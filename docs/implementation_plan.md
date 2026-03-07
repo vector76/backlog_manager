@@ -467,6 +467,7 @@ the `beads_created → done` transition by detecting all beads are closed.
 
 **CLI commands added in this chunk:**
 
+- `bm start-generate <feature-id>` — Claim feature for generation
 - `bm register-beads <feature-id>` — Register bead IDs with a feature
 - `bm register-artifact <feature-id>` — Register plan/beads document
 - `bm complete <feature-id>` — Mark generation complete
