@@ -374,12 +374,24 @@ func handleWebCreateFeature(st Store) http.HandlerFunc {
 
 // --- Feature detail handler ---
 
+// featureIterationPageData holds data for one dialog iteration on the feature page.
+type featureIterationPageData struct {
+	Round       int
+	Description string
+	Questions   string
+	Response    string
+	IsFinal     bool
+	IsLast      bool
+}
+
 type featureDetailPageData struct {
 	basePageData
 	ProjectName        string
 	Feature            featureRowData
 	InitialDescription string
-	Iterations         []model.IterationContent
+	CurrentDescription string
+	LatestQuestions    string
+	Iterations         []featureIterationPageData
 }
 
 func handleWebFeature(st Store) http.HandlerFunc {
@@ -392,21 +404,126 @@ func handleWebFeature(st Store) http.HandlerFunc {
 			http.NotFound(w, r)
 			return
 		}
+
+		// Build IsFinal map from feature metadata.
+		isFinalMap := make(map[int]bool)
+		for _, it := range detail.Feature.Iterations {
+			if it.IsFinal {
+				isFinalMap[it.Round] = true
+			}
+		}
+
+		// Build iteration page data with IsLast marked on the final element.
+		iterations := make([]featureIterationPageData, len(detail.Iterations))
+		for i, ic := range detail.Iterations {
+			iterations[i] = featureIterationPageData{
+				Round:       ic.Round,
+				Description: ic.Description,
+				Questions:   ic.Questions,
+				Response:    ic.Response,
+				IsFinal:     isFinalMap[ic.Round],
+				IsLast:      i == len(detail.Iterations)-1,
+			}
+		}
+
+		// Current description is the most recent non-empty iteration description, or the initial if none.
+		// Searching backwards handles the case where a reopen creates a new iteration
+		// with no description yet (only a response file).
+		currentDesc := detail.InitialDescription
+		for i := len(detail.Iterations) - 1; i >= 0; i-- {
+			if d := detail.Iterations[i].Description; d != "" {
+				currentDesc = d
+				break
+			}
+		}
+
+		// Latest questions are shown prominently when awaiting human response.
+		var latestQuestions string
+		if detail.Status == model.StatusAwaitingHuman && len(detail.Iterations) > 0 {
+			latestQuestions = detail.Iterations[len(detail.Iterations)-1].Questions
+		}
+
 		tmpl.Execute(w, featureDetailPageData{
 			basePageData: basePageData{Breadcrumbs: []breadcrumb{
 				{Label: "Dashboard", URL: "/"},
 				{Label: projectName, URL: "/project/" + projectName},
 				{Label: detail.Name},
 			}},
-			ProjectName: projectName,
-			Feature: featureRowData{
+			ProjectName:        projectName,
+			Feature:            featureRowData{
 				ID:        detail.ID,
 				Name:      detail.Name,
 				Status:    detail.Status.String(),
 				UpdatedAt: detail.UpdatedAt.Format("2006-01-02 15:04"),
 			},
 			InitialDescription: detail.InitialDescription,
-			Iterations:         detail.Iterations,
+			CurrentDescription: currentDesc,
+			LatestQuestions:    latestQuestions,
+			Iterations:         iterations,
 		})
+	}
+}
+
+// handleWebUpdateDescription handles POST /project/{name}/feature/{id}/description.
+// It updates description_v0.md for a draft feature and redirects back.
+func handleWebUpdateDescription(st Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		projectName := chi.URLParam(r, "name")
+		featureID := chi.URLParam(r, "id")
+		featurePage := "/project/" + projectName + "/feature/" + featureID
+		if err := r.ParseForm(); err != nil {
+			http.Redirect(w, r, featurePage, http.StatusFound)
+			return
+		}
+		description := r.FormValue("description")
+		_ = st.UpdateDescriptionV0(projectName, featureID, description)
+		http.Redirect(w, r, featurePage, http.StatusFound)
+	}
+}
+
+// handleWebStartDialog handles POST /project/{name}/feature/{id}/start-dialog.
+// It starts the dialog for a draft feature and redirects back.
+func handleWebStartDialog(st Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		projectName := chi.URLParam(r, "name")
+		featureID := chi.URLParam(r, "id")
+		_ = st.StartDialog(projectName, featureID)
+		http.Redirect(w, r, "/project/"+projectName+"/feature/"+featureID, http.StatusFound)
+	}
+}
+
+// handleWebRespond handles POST /project/{name}/feature/{id}/respond.
+// It stores the user's response and redirects back. The "final" form field controls
+// whether this is marked as a final response.
+func handleWebRespond(st Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		projectName := chi.URLParam(r, "name")
+		featureID := chi.URLParam(r, "id")
+		featurePage := "/project/" + projectName + "/feature/" + featureID
+		if err := r.ParseForm(); err != nil {
+			http.Redirect(w, r, featurePage, http.StatusFound)
+			return
+		}
+		response := r.FormValue("response")
+		final := r.FormValue("final") == "true"
+		_ = st.RespondToDialog(projectName, featureID, response, final)
+		http.Redirect(w, r, featurePage, http.StatusFound)
+	}
+}
+
+// handleWebReopen handles POST /project/{name}/feature/{id}/reopen.
+// It reopens a fully-specified feature dialog and redirects back.
+func handleWebReopen(st Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		projectName := chi.URLParam(r, "name")
+		featureID := chi.URLParam(r, "id")
+		featurePage := "/project/" + projectName + "/feature/" + featureID
+		if err := r.ParseForm(); err != nil {
+			http.Redirect(w, r, featurePage, http.StatusFound)
+			return
+		}
+		message := r.FormValue("message")
+		_ = st.ReopenDialog(projectName, featureID, message)
+		http.Redirect(w, r, featurePage, http.StatusFound)
 	}
 }

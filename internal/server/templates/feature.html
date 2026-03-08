@@ -4,42 +4,121 @@
 <div class="flex-row" style="margin-bottom:1rem">
   <div>
     <h1 style="margin-bottom:0.25rem">{{.Feature.Name}}</h1>
-    <span class="badge {{statusBadgeClass .Feature.Status}}">{{.Feature.Status}}</span>
+    <span class="badge {{statusBadgeClass .Feature.Status}}">{{statusLabel .Feature.Status}}</span>
     <span class="muted" style="font-size:0.85rem;margin-left:0.5rem">updated {{.Feature.UpdatedAt}}</span>
   </div>
 </div>
 
 <div class="card">
-  <h2>Initial Description</h2>
-  <div class="md-content">{{renderMarkdown .InitialDescription}}</div>
+  <h2>Current Description</h2>
+  <div class="md-content">{{renderMarkdown .CurrentDescription}}</div>
 </div>
+
+{{if eq .Feature.Status "draft"}}
+<div class="card">
+  <h2>Actions</h2>
+  <details style="margin-bottom:1rem">
+    <summary style="cursor:pointer;font-weight:600">Edit Description</summary>
+    <form method="post" action="/project/{{.ProjectName}}/feature/{{.Feature.ID}}/description" style="margin-top:0.75rem">
+      <textarea name="description" rows="10" style="width:100%;box-sizing:border-box">{{.InitialDescription}}</textarea>
+      <div style="margin-top:0.5rem">
+        <button type="submit" class="btn">Save Description</button>
+      </div>
+    </form>
+  </details>
+  <form method="post" action="/project/{{.ProjectName}}/feature/{{.Feature.ID}}/start-dialog">
+    <button type="submit" class="btn btn-primary">Start Dialog</button>
+  </form>
+</div>
+{{end}}
+
+{{if eq .Feature.Status "awaiting_human"}}
+<div class="card">
+  <h2>Respond to Client</h2>
+  {{if .LatestQuestions}}
+  <div style="background:var(--card-bg);border:1px solid var(--border);border-radius:6px;padding:1rem;margin-bottom:1rem">
+    <div style="font-weight:600;margin-bottom:0.5rem">Client's Questions</div>
+    <div class="md-content">{{renderMarkdown .LatestQuestions}}</div>
+  </div>
+  {{end}}
+  <form method="post" action="/project/{{.ProjectName}}/feature/{{.Feature.ID}}/respond">
+    <div style="margin-bottom:0.75rem">
+      <label for="response" style="font-weight:600;display:block;margin-bottom:0.25rem">Your Response</label>
+      <textarea name="response" id="response" rows="8" style="width:100%;box-sizing:border-box"></textarea>
+    </div>
+    <div class="flex-row">
+      <button type="submit" name="final" value="false" class="btn">Send Response</button>
+      <button type="submit" name="final" value="true" class="btn btn-primary">Final Answer</button>
+    </div>
+  </form>
+</div>
+{{end}}
+
+{{if eq .Feature.Status "awaiting_client"}}
+<div class="card">
+  <div class="muted" style="text-align:center;padding:0.5rem 0">&#8987; Client is processing&hellip;</div>
+</div>
+{{end}}
+
+{{if eq .Feature.Status "fully_specified"}}
+<div class="card">
+  <h2>Actions</h2>
+  <details style="margin-bottom:1rem">
+    <summary style="cursor:pointer;font-weight:600">Reopen Dialog</summary>
+    <form method="post" action="/project/{{.ProjectName}}/feature/{{.Feature.ID}}/reopen" style="margin-top:0.75rem">
+      <div style="margin-bottom:0.5rem">
+        <label for="reopen-message" style="font-weight:600;display:block;margin-bottom:0.25rem">Message (optional)</label>
+        <textarea name="message" id="reopen-message" rows="4" style="width:100%;box-sizing:border-box"></textarea>
+      </div>
+      <button type="submit" class="btn">Reopen</button>
+    </form>
+  </details>
+  <div style="opacity:0.45;margin-top:0.25rem" title="Not yet available">
+    <button type="button" class="btn" disabled>Generate Now</button>
+    <select disabled style="margin-left:0.5rem">
+      <option>Generate After&hellip; (not yet available)</option>
+    </select>
+  </div>
+</div>
+{{end}}
+
+{{if or (eq .Feature.Status "waiting") (eq .Feature.Status "ready_to_generate") (eq .Feature.Status "generating") (eq .Feature.Status "beads_created")}}
+<div class="card">
+  <div class="muted" style="margin-bottom:0.5rem">Status: <strong>{{statusLabel .Feature.Status}}</strong></div>
+  <button type="button" class="btn" disabled>Halt</button>
+</div>
+{{end}}
 
 {{if .Iterations}}
+<h2 style="margin-top:1.5rem">Dialog History</h2>
 {{range .Iterations}}
-<div class="card">
-  <div style="font-size:0.85rem;font-weight:600;color:var(--muted);margin-bottom:0.75rem">Round {{.Round}}</div>
+<details {{if .IsLast}}open{{end}} style="margin-bottom:0.75rem">
+  <summary style="cursor:pointer;font-weight:600;padding:0.5rem 0">
+    Round {{.Round}}{{if .IsFinal}} &mdash; <span class="badge badge-fully-specified" style="font-size:0.75rem">Final</span>{{end}}
+  </summary>
+  <div class="card" style="margin-top:0.5rem">
+    {{if .Description}}
+    <div class="iteration-block">
+      <div class="iteration-label">Revised Description</div>
+      <div class="md-content">{{renderMarkdown .Description}}</div>
+    </div>
+    {{end}}
 
-  {{if .Description}}
-  <div class="iteration-block">
-    <div class="iteration-label">Revised Description</div>
-    <div class="md-content">{{renderMarkdown .Description}}</div>
-  </div>
-  {{end}}
+    {{if .Questions}}
+    <div class="iteration-block">
+      <div class="iteration-label">Client Questions</div>
+      <div class="md-content">{{renderMarkdown .Questions}}</div>
+    </div>
+    {{end}}
 
-  {{if .Questions}}
-  <div class="iteration-block">
-    <div class="iteration-label">Client Questions</div>
-    <div class="md-content">{{renderMarkdown .Questions}}</div>
+    {{if .Response}}
+    <div class="iteration-block">
+      <div class="iteration-label">Human Response</div>
+      <div class="md-content">{{renderMarkdown .Response}}</div>
+    </div>
+    {{end}}
   </div>
-  {{end}}
-
-  {{if .Response}}
-  <div class="iteration-block">
-    <div class="iteration-label">Human Response</div>
-    <div class="md-content">{{renderMarkdown .Response}}</div>
-  </div>
-  {{end}}
-</div>
+</details>
 {{end}}
 {{end}}
 {{end}}

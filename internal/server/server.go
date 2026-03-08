@@ -108,6 +108,10 @@ func New(cfg *config.Config, st Store) *http.Server {
 		r.Get("/project/{name}/new", handleWebNewFeature(st))
 		r.Post("/project/{name}/features", handleWebCreateFeature(st))
 		r.Get("/project/{name}/feature/{id}", handleWebFeature(st))
+		r.Post("/project/{name}/feature/{id}/description", handleWebUpdateDescription(st))
+		r.Post("/project/{name}/feature/{id}/start-dialog", handleWebStartDialog(st))
+		r.Post("/project/{name}/feature/{id}/respond", handleWebRespond(st))
+		r.Post("/project/{name}/feature/{id}/reopen", handleWebReopen(st))
 	})
 
 	return &http.Server{
