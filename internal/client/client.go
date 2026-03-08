@@ -244,9 +244,14 @@ func (c *Client) StartGenerate(featureID string) (map[string]any, error) {
 	return c.postFeatureAction(featureID, "start-generate", nil)
 }
 
-// RegisterBeads calls POST /api/v1/features/{id}/register-beads with the given bead IDs.
-func (c *Client) RegisterBeads(featureID string, beadIDs []string) (map[string]any, error) {
-	return c.postFeatureAction(featureID, "register-beads", map[string]any{"bead_ids": beadIDs})
+// RegisterBead calls POST /api/v1/features/{id}/register-bead with a single bead ID.
+func (c *Client) RegisterBead(featureID, beadID string) (map[string]any, error) {
+	return c.postFeatureAction(featureID, "register-bead", map[string]any{"bead_id": beadID})
+}
+
+// BeadsDone calls POST /api/v1/features/{id}/beads-done to finalize bead registration.
+func (c *Client) BeadsDone(featureID string) (map[string]any, error) {
+	return c.postFeatureAction(featureID, "beads-done", nil)
 }
 
 // RegisterArtifact calls POST /api/v1/features/{id}/register-artifact.

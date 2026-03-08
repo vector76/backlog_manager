@@ -222,3 +222,21 @@ func TestBeadMonitor_poll_clientError_doesNotCrash(t *testing.T) {
 	// Should not panic.
 	monitor.Poll()
 }
+
+func TestBeadMonitor_poll_zeroBeads_autoComplete(t *testing.T) {
+	// A feature in beads_created with no beads should be auto-completed immediately.
+	st, projName, featureID := newMonitorStore(t, []string{})
+
+	// No bead server needed — zero beads means no external calls.
+	client := &errClient{err: errors.New("should not be called")}
+	monitor := server.NewBeadMonitor(client, st, time.Hour)
+	monitor.Poll()
+
+	f, err := st.GetFeature(projName, featureID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.Status != model.StatusDone {
+		t.Errorf("zero-bead feature: want done after poll, got %s", f.Status)
+	}
+}

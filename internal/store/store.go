@@ -469,6 +469,29 @@ func (s *Store) UpdateFeature(updated *model.Feature) error {
 	return fmt.Errorf("feature %q not found in project %q", updated.ID, updated.Project)
 }
 
+// AppendBeadID atomically appends a single bead ID to a generating feature.
+// Returns an error if the feature is not in generating status.
+func (s *Store) AppendBeadID(projectName, featureID, beadID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	idx, err := s.findFeatureIndexLocked(projectName, featureID)
+	if err != nil {
+		return err
+	}
+	if s.features[projectName][idx].Status != model.StatusGenerating {
+		return fmt.Errorf("invalid status: register-bead requires generating status, feature is in %v", s.features[projectName][idx].Status)
+	}
+	old := s.features[projectName][idx]
+	s.features[projectName][idx].BeadIDs = append(s.features[projectName][idx].BeadIDs, beadID)
+	s.features[projectName][idx].UpdatedAt = time.Now().UTC()
+	if err := s.saveFeatures(projectName); err != nil {
+		s.features[projectName][idx] = old
+		return err
+	}
+	return nil
+}
+
 // DeleteFeature removes a feature and its files.
 func (s *Store) DeleteFeature(projectName, featureID string) error {
 	s.mu.Lock()

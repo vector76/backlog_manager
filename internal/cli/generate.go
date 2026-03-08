@@ -31,19 +31,38 @@ func newStartGenerateCmd() *cobra.Command {
 	}
 }
 
-func newRegisterBeadsCmd() *cobra.Command {
+func newRegisterBeadCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "register-beads <feature-id> <bead-id> [<bead-id>...]",
-		Short: "Store bead IDs on a feature and transition generating -> beads_created",
-		Args:  cobra.MinimumNArgs(2),
+		Use:   "register-bead <feature-id> <bead-id>",
+		Short: "Append a single bead ID to a generating feature",
+		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c := client.New()
 			if c.Token == "" {
 				return fmt.Errorf("BM_TOKEN is required (set env var or .env file)")
 			}
-			featureID := args[0]
-			beadIDs := args[1:]
-			result, err := c.RegisterBeads(featureID, beadIDs)
+			result, err := c.RegisterBead(args[0], args[1])
+			if err != nil {
+				return err
+			}
+			enc := json.NewEncoder(cmd.OutOrStdout())
+			enc.SetIndent("", "  ")
+			return enc.Encode(result)
+		},
+	}
+}
+
+func newBeadsDoneCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "beads-done <feature-id>",
+		Short: "Finalize bead registration and transition generating -> beads_created",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c := client.New()
+			if c.Token == "" {
+				return fmt.Errorf("BM_TOKEN is required (set env var or .env file)")
+			}
+			result, err := c.BeadsDone(args[0])
 			if err != nil {
 				return err
 			}

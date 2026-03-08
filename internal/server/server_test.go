@@ -1485,63 +1485,124 @@ func TestHandleStartGenerate_WrongStatus(t *testing.T) {
 	}
 }
 
-func TestHandleRegisterBeads_Success(t *testing.T) {
-	srv, st := newTestServer(t)
-	featureID := setupFeatureAtFullySpecified(t, srv, st, "regbeads")
+func setupFeatureAtGenerating(t *testing.T, srv *http.Server, st *store.Store, projectName string) string {
+	t.Helper()
+	featureID := setupFeatureAtFullySpecified(t, srv, st, projectName)
 	for _, s := range []model.FeatureStatus{model.StatusReadyToGenerate, model.StatusGenerating} {
-		if err := st.TransitionStatus("regbeads", featureID, s); err != nil {
+		if err := st.TransitionStatus(projectName, featureID, s); err != nil {
 			t.Fatalf("transition to %v: %v", s, err)
 		}
 	}
-	token := tokenForProject(t, st, "regbeads")
+	return featureID
+}
 
-	w := doRequest(t, srv, "POST", "/api/v1/features/"+featureID+"/register-beads",
-		map[string]any{"bead_ids": []string{"bd-aaa1", "bd-bbb2"}}, bearerAuth(token))
+func TestHandleRegisterBead_Success(t *testing.T) {
+	srv, st := newTestServer(t)
+	featureID := setupFeatureAtGenerating(t, srv, st, "regbead")
+	token := tokenForProject(t, st, "regbead")
+
+	// Register first bead — should stay generating.
+	w := doRequest(t, srv, "POST", "/api/v1/features/"+featureID+"/register-bead",
+		map[string]any{"bead_id": "bd-aaa1"}, bearerAuth(token))
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 	var resp map[string]any
-	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
-		t.Fatal(err)
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp["status"] != "generating" {
+		t.Errorf("expected status still generating after register-bead, got %v", resp["status"])
 	}
-	if resp["status"] != "beads_created" {
-		t.Errorf("expected status beads_created, got %v", resp["status"])
+	beadIDs, _ := resp["bead_ids"].([]any)
+	if len(beadIDs) != 1 {
+		t.Errorf("expected 1 bead_id, got %v", resp["bead_ids"])
 	}
-	beadIDs, ok := resp["bead_ids"].([]any)
-	if !ok || len(beadIDs) != 2 {
-		t.Errorf("expected 2 bead_ids, got %v", resp["bead_ids"])
+
+	// Register second bead — should accumulate.
+	w = doRequest(t, srv, "POST", "/api/v1/features/"+featureID+"/register-bead",
+		map[string]any{"bead_id": "bd-bbb2"}, bearerAuth(token))
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	json.NewDecoder(w.Body).Decode(&resp)
+	beadIDs, _ = resp["bead_ids"].([]any)
+	if len(beadIDs) != 2 {
+		t.Errorf("expected 2 bead_ids after second register-bead, got %v", resp["bead_ids"])
 	}
 }
 
-func TestHandleRegisterBeads_Empty(t *testing.T) {
+func TestHandleRegisterBead_MissingBeadID(t *testing.T) {
 	srv, st := newTestServer(t)
-	featureID := setupFeatureAtFullySpecified(t, srv, st, "regbeads2")
-	token := tokenForProject(t, st, "regbeads2")
+	featureID := setupFeatureAtGenerating(t, srv, st, "regbead2")
+	token := tokenForProject(t, st, "regbead2")
 
-	w := doRequest(t, srv, "POST", "/api/v1/features/"+featureID+"/register-beads",
-		map[string]any{"bead_ids": []string{}}, bearerAuth(token))
+	w := doRequest(t, srv, "POST", "/api/v1/features/"+featureID+"/register-bead",
+		map[string]any{"bead_id": ""}, bearerAuth(token))
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("expected 400, got %d", w.Code)
 	}
 }
 
-func TestHandleRegisterBeads_WrongStatus_DoesNotPersistBeadIDs(t *testing.T) {
-	// Feature is in fully_specified (not generating) — BeadIDs must not be persisted.
+func TestHandleRegisterBead_WrongStatus(t *testing.T) {
 	srv, st := newTestServer(t)
-	featureID := setupFeatureAtFullySpecified(t, srv, st, "regbeads3")
-	token := tokenForProject(t, st, "regbeads3")
+	featureID := setupFeatureAtFullySpecified(t, srv, st, "regbead3")
+	token := tokenForProject(t, st, "regbead3")
 
-	w := doRequest(t, srv, "POST", "/api/v1/features/"+featureID+"/register-beads",
-		map[string]any{"bead_ids": []string{"bd-111"}}, bearerAuth(token))
+	w := doRequest(t, srv, "POST", "/api/v1/features/"+featureID+"/register-bead",
+		map[string]any{"bead_id": "bd-111"}, bearerAuth(token))
 	if w.Code != http.StatusConflict {
 		t.Errorf("expected 409, got %d", w.Code)
 	}
-	f, err := st.GetFeature("regbeads3", featureID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	f, _ := st.GetFeature("regbead3", featureID)
 	if len(f.BeadIDs) != 0 {
 		t.Errorf("BeadIDs must not be persisted when status is wrong, got %v", f.BeadIDs)
+	}
+}
+
+func TestHandleBeadsDone_Success(t *testing.T) {
+	srv, st := newTestServer(t)
+	featureID := setupFeatureAtGenerating(t, srv, st, "beadsdone")
+	token := tokenForProject(t, st, "beadsdone")
+
+	// Register a bead then finalize.
+	doRequest(t, srv, "POST", "/api/v1/features/"+featureID+"/register-bead",
+		map[string]any{"bead_id": "bd-aaa1"}, bearerAuth(token))
+
+	w := doRequest(t, srv, "POST", "/api/v1/features/"+featureID+"/beads-done", nil, bearerAuth(token))
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp["status"] != "beads_created" {
+		t.Errorf("expected beads_created, got %v", resp["status"])
+	}
+}
+
+func TestHandleBeadsDone_EmptyBeadList(t *testing.T) {
+	// beads-done with zero registered beads is valid.
+	srv, st := newTestServer(t)
+	featureID := setupFeatureAtGenerating(t, srv, st, "beadsdone2")
+	token := tokenForProject(t, st, "beadsdone2")
+
+	w := doRequest(t, srv, "POST", "/api/v1/features/"+featureID+"/beads-done", nil, bearerAuth(token))
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp["status"] != "beads_created" {
+		t.Errorf("expected beads_created, got %v", resp["status"])
+	}
+}
+
+func TestHandleBeadsDone_WrongStatus(t *testing.T) {
+	srv, st := newTestServer(t)
+	featureID := setupFeatureAtFullySpecified(t, srv, st, "beadsdone3")
+	token := tokenForProject(t, st, "beadsdone3")
+
+	w := doRequest(t, srv, "POST", "/api/v1/features/"+featureID+"/beads-done", nil, bearerAuth(token))
+	if w.Code != http.StatusConflict {
+		t.Errorf("expected 409, got %d", w.Code)
 	}
 }
 

@@ -40,6 +40,7 @@ type Store interface {
 	GetFeature(projectName, featureID string) (*model.Feature, error)
 	GetFeatureDetail(projectName, featureID string) (*model.FeatureDetail, error)
 	UpdateFeature(updated *model.Feature) error
+	AppendBeadID(projectName, featureID, beadID string) error
 	UpdateDescriptionV0(projectName, featureID, description string) error
 	StartDialog(projectName, featureID string) error
 	RespondToDialog(projectName, featureID string, response string, final bool) error
@@ -101,7 +102,8 @@ func New(cfg *config.Config, st Store, monitors ...*BeadMonitor) *http.Server {
 		r.Get("/api/v1/features/{id}/pending", handleGetPending(st))
 		r.Post("/api/v1/features/{id}/submit-dialog", handleSubmitDialog(st))
 		r.Post("/api/v1/features/{id}/start-generate", handleStartGenerate(st))
-		r.Post("/api/v1/features/{id}/register-beads", handleRegisterBeads(st))
+		r.Post("/api/v1/features/{id}/register-bead", handleRegisterBead(st))
+		r.Post("/api/v1/features/{id}/beads-done", handleBeadsDone(st))
 		r.Post("/api/v1/features/{id}/register-artifact", handleRegisterArtifact(st))
 		r.Post("/api/v1/features/{id}/complete", handleCompleteFeature(st))
 	})
@@ -1046,13 +1048,13 @@ func handleStartGenerate(st Store) http.HandlerFunc {
 	}
 }
 
-type registerBeadsRequest struct {
-	BeadIDs []string `json:"bead_ids"`
+type registerBeadRequest struct {
+	BeadID string `json:"bead_id"`
 }
 
-// handleRegisterBeads handles POST /api/v1/features/{id}/register-beads.
-// Stores bead IDs on a feature and transitions generating -> beads_created.
-func handleRegisterBeads(st Store) http.HandlerFunc {
+// handleRegisterBead handles POST /api/v1/features/{id}/register-bead.
+// Appends a single bead ID to the feature; feature remains in generating status.
+func handleRegisterBead(st Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		project, ok := r.Context().Value(projectContextKey).(*model.Project)
 		if !ok || project == nil {
@@ -1060,15 +1062,44 @@ func handleRegisterBeads(st Store) http.HandlerFunc {
 			return
 		}
 		featureID := chi.URLParam(r, "id")
-		var req registerBeadsRequest
+		var req registerBeadRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid request body")
 			return
 		}
-		if len(req.BeadIDs) == 0 {
-			writeError(w, http.StatusBadRequest, "bead_ids is required")
+		if req.BeadID == "" {
+			writeError(w, http.StatusBadRequest, "bead_id is required")
 			return
 		}
+		if err := st.AppendBeadID(project.Name, featureID, req.BeadID); err != nil {
+			if strings.Contains(err.Error(), "not found") {
+				writeError(w, http.StatusNotFound, err.Error())
+			} else if strings.Contains(err.Error(), "invalid") {
+				writeError(w, http.StatusConflict, err.Error())
+			} else {
+				writeError(w, http.StatusInternalServerError, "internal error")
+			}
+			return
+		}
+		updated, err := st.GetFeature(project.Name, featureID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "internal error")
+			return
+		}
+		writeJSON(w, http.StatusOK, toFeatureResponse(*updated))
+	}
+}
+
+// handleBeadsDone handles POST /api/v1/features/{id}/beads-done.
+// Transitions a generating feature to beads_created; no body required.
+func handleBeadsDone(st Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		project, ok := r.Context().Value(projectContextKey).(*model.Project)
+		if !ok || project == nil {
+			writeError(w, http.StatusInternalServerError, "internal error")
+			return
+		}
+		featureID := chi.URLParam(r, "id")
 		f, err := st.GetFeature(project.Name, featureID)
 		if err != nil {
 			if strings.Contains(err.Error(), "not found") {
@@ -1079,12 +1110,7 @@ func handleRegisterBeads(st Store) http.HandlerFunc {
 			return
 		}
 		if f.Status != model.StatusGenerating {
-			writeError(w, http.StatusConflict, fmt.Sprintf("register-beads requires generating status, feature is in %v", f.Status))
-			return
-		}
-		f.BeadIDs = req.BeadIDs
-		if err := st.UpdateFeature(f); err != nil {
-			writeError(w, http.StatusInternalServerError, "internal error")
+			writeError(w, http.StatusConflict, fmt.Sprintf("beads-done requires generating status, feature is in %v", f.Status))
 			return
 		}
 		if err := st.TransitionStatus(project.Name, featureID, model.StatusBeadsCreated); err != nil {

@@ -16,7 +16,8 @@ func NewRootCmd() *cobra.Command {
 	root.AddCommand(newFetchCmd())
 	root.AddCommand(newSubmitCmd())
 	root.AddCommand(newStartGenerateCmd())
-	root.AddCommand(newRegisterBeadsCmd())
+	root.AddCommand(newRegisterBeadCmd())
+	root.AddCommand(newBeadsDoneCmd())
 	root.AddCommand(newRegisterArtifactCmd())
 	root.AddCommand(newCompleteCmd())
 	return root

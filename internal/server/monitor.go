@@ -66,6 +66,19 @@ func (m *BeadMonitor) Poll() {
 		}
 		for _, f := range features {
 			if len(f.BeadIDs) == 0 {
+				// Zero beads: nothing to wait for, auto-complete immediately.
+				if err := m.store.TransitionStatus(p.Name, f.ID, model.StatusDone); err != nil {
+					log.Printf("bead monitor: auto-complete zero-bead feature %s: %v", f.ID, err)
+					continue
+				}
+				log.Printf("bead monitor: auto-completed feature %s (zero beads)", f.ID)
+				if allFeatures, err := m.store.ListFeatures(p.Name, nil); err == nil {
+					for _, dep := range allFeatures {
+						if dep.Status == model.StatusWaiting && dep.GenerateAfter == f.ID {
+							_ = m.store.TransitionStatus(p.Name, dep.ID, model.StatusReadyToGenerate)
+						}
+					}
+				}
 				continue
 			}
 			m.checkFeature(p.Name, f)

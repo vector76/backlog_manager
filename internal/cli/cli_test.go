@@ -270,17 +270,16 @@ func TestStartGenerateCmd_NoToken(t *testing.T) {
 	}
 }
 
-func TestRegisterBeadsCmd(t *testing.T) {
-	ts := makeFeatureServer(t, "ft-abc", "register-beads", func(w http.ResponseWriter, r *http.Request) {
+func TestRegisterBeadCmd(t *testing.T) {
+	ts := makeFeatureServer(t, "ft-abc", "register-bead", func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any
 		json.NewDecoder(r.Body).Decode(&body)
-		ids, _ := body["bead_ids"].([]any)
-		if len(ids) != 2 {
+		if body["bead_id"] == "" {
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{"id": "ft-abc", "status": "beads_created", "bead_ids": ids})
+		json.NewEncoder(w).Encode(map[string]any{"id": "ft-abc", "status": "generating", "bead_ids": []string{body["bead_id"].(string)}})
 	})
 	defer ts.Close()
 
@@ -291,7 +290,35 @@ func TestRegisterBeadsCmd(t *testing.T) {
 
 	var out bytes.Buffer
 	root := cli.NewRootCmd()
-	root.SetArgs([]string{"register-beads", "ft-abc", "bd-111", "bd-222"})
+	root.SetArgs([]string{"register-bead", "ft-abc", "bd-111"})
+	root.SetOut(&out)
+	if err := root.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var result map[string]any
+	if err := json.NewDecoder(&out).Decode(&result); err != nil {
+		t.Fatalf("expected JSON output: %s, err: %v", out.String(), err)
+	}
+	if result["status"] != "generating" {
+		t.Errorf("expected status generating, got %v", result["status"])
+	}
+}
+
+func TestBeadsDoneCmd(t *testing.T) {
+	ts := makeFeatureServer(t, "ft-abc", "beads-done", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"id": "ft-abc", "status": "beads_created"})
+	})
+	defer ts.Close()
+
+	os.Setenv("BM_URL", ts.URL)
+	os.Setenv("BM_TOKEN", "tok")
+	defer os.Unsetenv("BM_URL")
+	defer os.Unsetenv("BM_TOKEN")
+
+	var out bytes.Buffer
+	root := cli.NewRootCmd()
+	root.SetArgs([]string{"beads-done", "ft-abc"})
 	root.SetOut(&out)
 	if err := root.Execute(); err != nil {
 		t.Fatalf("unexpected error: %v", err)

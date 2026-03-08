@@ -114,8 +114,9 @@ bm submit <feature-id> [options]
 # Start code generation for a feature
 bm start-generate <feature-id>
 
-# Register created beads with a feature
-bm register-beads <feature-id> <bead-ids...>
+# Register beads one at a time, then finalize
+bm register-bead <feature-id> <bead-id>
+bm beads-done <feature-id>
 
 # Register generated artifacts for tracking
 bm register-artifact <feature-id> [options]
