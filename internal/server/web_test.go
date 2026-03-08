@@ -230,6 +230,25 @@ func TestWebNewFeaturePage(t *testing.T) {
 	}
 }
 
+// TestWebNewFeatureCancelLink checks that the Cancel button on the new feature form links to the dashboard.
+func TestWebNewFeatureCancelLink(t *testing.T) {
+	srv, st := newTestServer(t)
+	cookie := loginWeb(t, srv)
+
+	_, err := st.CreateProject("cancel-link-project", "tok")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	w := webRequest(t, srv, "GET", "/project/cancel-link-project/new", "", cookie)
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), `href="/"`) || !strings.Contains(w.Body.String(), "Cancel") {
+		t.Errorf("expected cancel link pointing to dashboard root, got: %s", w.Body.String())
+	}
+}
+
 // TestWebCreateFeature checks that a feature can be created via the web form.
 func TestWebCreateFeature(t *testing.T) {
 	srv, st := newTestServer(t)
