@@ -7,5 +7,7 @@ func NewRootCmd() *cobra.Command {
 		Use:   "bm",
 		Short: "Backlog manager — server and client",
 	}
+	root.AddCommand(newServeCmd())
+	root.AddCommand(newStatusCmd())
 	return root
 }

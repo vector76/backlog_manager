@@ -245,6 +245,19 @@ func (s *Store) CreateProject(name, token string) (*model.Project, error) {
 	return &p, nil
 }
 
+// GetProjectByToken returns the project with the given token, or an error if not found.
+func (s *Store) GetProjectByToken(token string) (*model.Project, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, p := range s.projects {
+		if p.Token == token {
+			cp := p
+			return &cp, nil
+		}
+	}
+	return nil, fmt.Errorf("no project found for token")
+}
+
 // ListProjects returns all projects.
 func (s *Store) ListProjects() []model.Project {
 	s.mu.RLock()
