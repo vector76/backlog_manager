@@ -392,6 +392,7 @@ type featureDetailPageData struct {
 	CurrentDescription string
 	LatestQuestions    string
 	Iterations         []featureIterationPageData
+	OtherFeatures      []featureRowData
 }
 
 func handleWebFeature(st Store) http.HandlerFunc {
@@ -443,14 +444,34 @@ func handleWebFeature(st Store) http.HandlerFunc {
 			latestQuestions = detail.Iterations[len(detail.Iterations)-1].Questions
 		}
 
+		// Build list of incomplete features for the Generate After dropdown.
+		// Only needed when the feature is fully_specified (the only state showing the dropdown).
+		var otherFeatures []featureRowData
+		if detail.Status == model.StatusFullySpecified {
+			if allFeatures, err := st.ListFeatures(projectName, nil); err == nil {
+				for _, f := range allFeatures {
+					if f.ID != featureID &&
+						f.Status != model.StatusDone &&
+						f.Status != model.StatusAbandoned &&
+						f.Status != model.StatusHalted {
+						otherFeatures = append(otherFeatures, featureRowData{
+							ID:     f.ID,
+							Name:   f.Name,
+							Status: f.Status.String(),
+						})
+					}
+				}
+			}
+		}
+
 		tmpl.Execute(w, featureDetailPageData{
 			basePageData: basePageData{Breadcrumbs: []breadcrumb{
 				{Label: "Dashboard", URL: "/"},
 				{Label: projectName, URL: "/project/" + projectName},
 				{Label: detail.Name},
 			}},
-			ProjectName:        projectName,
-			Feature:            featureRowData{
+			ProjectName: projectName,
+			Feature: featureRowData{
 				ID:        detail.ID,
 				Name:      detail.Name,
 				Status:    detail.Status.String(),
@@ -460,6 +481,7 @@ func handleWebFeature(st Store) http.HandlerFunc {
 			CurrentDescription: currentDesc,
 			LatestQuestions:    latestQuestions,
 			Iterations:         iterations,
+			OtherFeatures:      otherFeatures,
 		})
 	}
 }
@@ -524,6 +546,49 @@ func handleWebReopen(st Store) http.HandlerFunc {
 		}
 		message := r.FormValue("message")
 		_ = st.ReopenDialog(projectName, featureID, message)
+		http.Redirect(w, r, featurePage, http.StatusFound)
+	}
+}
+
+// handleWebGenerateNow handles POST /project/{name}/feature/{id}/generate-now.
+// Transitions a fully_specified feature to ready_to_generate and redirects back.
+func handleWebGenerateNow(st Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		projectName := chi.URLParam(r, "name")
+		featureID := chi.URLParam(r, "id")
+		_ = st.TransitionStatus(projectName, featureID, model.StatusReadyToGenerate)
+		http.Redirect(w, r, "/project/"+projectName+"/feature/"+featureID, http.StatusFound)
+	}
+}
+
+// handleWebGenerateAfter handles POST /project/{name}/feature/{id}/generate-after.
+// Sets a dependency on another feature and transitions to waiting, then redirects back.
+func handleWebGenerateAfter(st Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		projectName := chi.URLParam(r, "name")
+		featureID := chi.URLParam(r, "id")
+		featurePage := "/project/" + projectName + "/feature/" + featureID
+		if err := r.ParseForm(); err != nil {
+			http.Redirect(w, r, featurePage, http.StatusFound)
+			return
+		}
+		afterFeatureID := r.FormValue("after_feature_id")
+		if afterFeatureID == "" {
+			http.Redirect(w, r, featurePage, http.StatusFound)
+			return
+		}
+		f, err := st.GetFeature(projectName, featureID)
+		if err != nil {
+			http.Redirect(w, r, featurePage, http.StatusFound)
+			return
+		}
+		if f.Status != model.StatusFullySpecified {
+			http.Redirect(w, r, featurePage, http.StatusFound)
+			return
+		}
+		f.GenerateAfter = afterFeatureID
+		_ = st.UpdateFeature(f)
+		_ = st.TransitionStatus(projectName, featureID, model.StatusWaiting)
 		http.Redirect(w, r, featurePage, http.StatusFound)
 	}
 }

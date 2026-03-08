@@ -672,6 +672,103 @@ func TestTransitionStatus(t *testing.T) {
 	}
 }
 
+func TestWriteArtifact(t *testing.T) {
+	s := newTestStore(t)
+	if _, err := s.CreateProject("p", "tok"); err != nil {
+		t.Fatal(err)
+	}
+	f, err := s.CreateFeature("p", "feat", "desc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.WriteArtifact("p", f.ID, "plan.md", "# Plan\nDo things."); err != nil {
+		t.Fatalf("WriteArtifact: %v", err)
+	}
+	got, err := s.ReadArtifact("p", f.ID, "plan.md")
+	if err != nil {
+		t.Fatalf("ReadArtifact: %v", err)
+	}
+	if got != "# Plan\nDo things." {
+		t.Errorf("got %q, want %q", got, "# Plan\nDo things.")
+	}
+}
+
+func TestWriteArtifact_BeadsType(t *testing.T) {
+	s := newTestStore(t)
+	if _, err := s.CreateProject("p", "tok"); err != nil {
+		t.Fatal(err)
+	}
+	f, err := s.CreateFeature("p", "feat", "desc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.WriteArtifact("p", f.ID, "beads.md", "# Beads\nbd-xxxx"); err != nil {
+		t.Fatalf("WriteArtifact: %v", err)
+	}
+	got, err := s.ReadArtifact("p", f.ID, "beads.md")
+	if err != nil {
+		t.Fatalf("ReadArtifact: %v", err)
+	}
+	if got != "# Beads\nbd-xxxx" {
+		t.Errorf("got %q, want %q", got, "# Beads\nbd-xxxx")
+	}
+}
+
+func TestTransitionStatus_GenerationPipeline(t *testing.T) {
+	s := newTestStore(t)
+	if _, err := s.CreateProject("p", "tok"); err != nil {
+		t.Fatal(err)
+	}
+	f, err := s.CreateFeature("p", "feat", "desc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pipeline := []model.FeatureStatus{
+		model.StatusAwaitingClient,
+		model.StatusFullySpecified,
+		model.StatusReadyToGenerate,
+		model.StatusGenerating,
+		model.StatusBeadsCreated,
+		model.StatusDone,
+	}
+	for _, s2 := range pipeline {
+		if err := s.TransitionStatus("p", f.ID, s2); err != nil {
+			t.Fatalf("transition to %v: %v", s2, err)
+		}
+	}
+	got, err := s.GetFeature("p", f.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != model.StatusDone {
+		t.Errorf("expected done, got %v", got.Status)
+	}
+}
+
+func TestTransitionStatus_WaitingPipeline(t *testing.T) {
+	s := newTestStore(t)
+	if _, err := s.CreateProject("p", "tok"); err != nil {
+		t.Fatal(err)
+	}
+	f, err := s.CreateFeature("p", "feat", "desc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// FullySpecified -> Waiting -> ReadyToGenerate
+	for _, st := range []model.FeatureStatus{model.StatusAwaitingClient, model.StatusFullySpecified, model.StatusWaiting, model.StatusReadyToGenerate} {
+		if err := s.TransitionStatus("p", f.ID, st); err != nil {
+			t.Fatalf("transition to %v: %v", st, err)
+		}
+	}
+	got, err := s.GetFeature("p", f.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != model.StatusReadyToGenerate {
+		t.Errorf("expected ready_to_generate, got %v", got.Status)
+	}
+}
+
 func TestTransitionStatusInvalid(t *testing.T) {
 	s := newTestStore(t)
 	if _, err := s.CreateProject("p", "tok"); err != nil {

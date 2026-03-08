@@ -73,11 +73,21 @@
       <button type="submit" class="btn">Reopen</button>
     </form>
   </details>
-  <div style="opacity:0.45;margin-top:0.25rem" title="Not yet available">
-    <button type="button" class="btn" disabled>Generate Now</button>
-    <select disabled style="margin-left:0.5rem">
-      <option>Generate After&hellip; (not yet available)</option>
-    </select>
+  <div class="flex-row" style="margin-top:0.25rem;align-items:center;gap:0.5rem">
+    <form method="post" action="/project/{{.ProjectName}}/feature/{{.Feature.ID}}/generate-now" style="display:inline">
+      <button type="submit" class="btn btn-primary">Generate Now</button>
+    </form>
+    {{if .OtherFeatures}}
+    <form method="post" action="/project/{{.ProjectName}}/feature/{{.Feature.ID}}/generate-after" style="display:inline;margin-left:0.5rem">
+      <select name="after_feature_id" style="margin-right:0.25rem">
+        <option value="">Generate After&hellip;</option>
+        {{range .OtherFeatures}}
+        <option value="{{.ID}}">{{.Name}} ({{.ID}})</option>
+        {{end}}
+      </select>
+      <button type="submit" class="btn">Set Dependency</button>
+    </form>
+    {{end}}
   </div>
 </div>
 {{end}}

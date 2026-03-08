@@ -239,6 +239,89 @@ func (c *Client) SubmitDialog(featureID, updatedDescription, questions string) (
 	return result, nil
 }
 
+// StartGenerate calls POST /api/v1/features/{id}/start-generate.
+func (c *Client) StartGenerate(featureID string) (map[string]any, error) {
+	return c.postFeatureAction(featureID, "start-generate", nil)
+}
+
+// RegisterBeads calls POST /api/v1/features/{id}/register-beads with the given bead IDs.
+func (c *Client) RegisterBeads(featureID string, beadIDs []string) (map[string]any, error) {
+	return c.postFeatureAction(featureID, "register-beads", map[string]any{"bead_ids": beadIDs})
+}
+
+// RegisterArtifact calls POST /api/v1/features/{id}/register-artifact.
+// Returns nil on success (204 No Content).
+func (c *Client) RegisterArtifact(featureID, artifactType, content string) error {
+	body := map[string]string{"type": artifactType, "content": content}
+	data, _ := json.Marshal(body)
+	req, err := http.NewRequest("POST", c.BaseURL+"/api/v1/features/"+featureID+"/register-artifact", bytes.NewReader(data))
+	if err != nil {
+		return fmt.Errorf("build request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if c.Token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.Token)
+	}
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		var errResp map[string]string
+		json.NewDecoder(resp.Body).Decode(&errResp)
+		if msg, ok := errResp["error"]; ok {
+			return fmt.Errorf("server error (%d): %s", resp.StatusCode, msg)
+		}
+		return fmt.Errorf("unexpected status: %d", resp.StatusCode)
+	}
+	return nil
+}
+
+// CompleteFeature calls POST /api/v1/features/{id}/complete.
+func (c *Client) CompleteFeature(featureID string) (map[string]any, error) {
+	return c.postFeatureAction(featureID, "complete", nil)
+}
+
+// postFeatureAction posts to /api/v1/features/{id}/{action} with optional JSON body.
+func (c *Client) postFeatureAction(featureID, action string, body any) (map[string]any, error) {
+	var reqBody *bytes.Reader
+	if body != nil {
+		data, _ := json.Marshal(body)
+		reqBody = bytes.NewReader(data)
+	} else {
+		reqBody = bytes.NewReader(nil)
+	}
+	req, err := http.NewRequest("POST", c.BaseURL+"/api/v1/features/"+featureID+"/"+action, reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("build request: %w", err)
+	}
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	if c.Token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.Token)
+	}
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		var errResp map[string]string
+		json.NewDecoder(resp.Body).Decode(&errResp)
+		if msg, ok := errResp["error"]; ok {
+			return nil, fmt.Errorf("server error (%d): %s", resp.StatusCode, msg)
+		}
+		return nil, fmt.Errorf("unexpected status: %d", resp.StatusCode)
+	}
+	var result map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
+	}
+	return result, nil
+}
+
 // loadEnv returns a map of environment variables, merging .env file as fallback.
 // Environment variables take priority over .env file values.
 func loadEnv() map[string]string {

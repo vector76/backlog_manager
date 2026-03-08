@@ -14,5 +14,9 @@ func NewRootCmd() *cobra.Command {
 	root.AddCommand(newPollCmd())
 	root.AddCommand(newFetchCmd())
 	root.AddCommand(newSubmitCmd())
+	root.AddCommand(newStartGenerateCmd())
+	root.AddCommand(newRegisterBeadsCmd())
+	root.AddCommand(newRegisterArtifactCmd())
+	root.AddCommand(newCompleteCmd())
 	return root
 }

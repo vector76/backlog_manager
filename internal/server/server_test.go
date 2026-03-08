@@ -1233,3 +1233,365 @@ func TestHandleSubmitDialog_NoAuth(t *testing.T) {
 		t.Errorf("expected 401, got %d", w.Code)
 	}
 }
+
+// --- Generation pipeline handlers ---
+
+func setupFeatureAtFullySpecified(t *testing.T, srv *http.Server, st *store.Store, projectName string) string {
+	t.Helper()
+	auth := basicAuth("admin", "secret")
+
+	// Create project
+	w := doRequest(t, srv, "POST", "/api/v1/projects", map[string]any{"name": projectName}, auth)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create project: %d", w.Code)
+	}
+
+	// Create feature
+	w = doRequest(t, srv, "POST", "/api/v1/projects/"+projectName+"/features",
+		map[string]any{"name": "feat", "description": "desc"}, auth)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create feature: %d", w.Code)
+	}
+	var feat map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&feat); err != nil {
+		t.Fatal(err)
+	}
+	featureID := feat["id"].(string)
+
+	// Advance to fully_specified
+	for _, s := range []model.FeatureStatus{model.StatusAwaitingClient, model.StatusFullySpecified} {
+		if err := st.TransitionStatus(projectName, featureID, s); err != nil {
+			t.Fatalf("transition to %v: %v", s, err)
+		}
+	}
+	return featureID
+}
+
+func TestHandleGenerateNow_Success(t *testing.T) {
+	srv, st := newTestServer(t)
+	auth := basicAuth("admin", "secret")
+	featureID := setupFeatureAtFullySpecified(t, srv, st, "gennow")
+
+	path := "/api/v1/projects/gennow/features/" + featureID + "/generate-now"
+	w := doRequest(t, srv, "POST", path, nil, auth)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp["status"] != "ready_to_generate" {
+		t.Errorf("expected status ready_to_generate, got %v", resp["status"])
+	}
+}
+
+func TestHandleGenerateNow_WrongStatus(t *testing.T) {
+	srv, st := newTestServer(t)
+	auth := basicAuth("admin", "secret")
+	_, featureID := setupFeatureWithStatus(t, srv, st, model.StatusDraft)
+
+	path := "/api/v1/projects/dialogproj/features/" + featureID + "/generate-now"
+	w := doRequest(t, srv, "POST", path, nil, auth)
+	if w.Code != http.StatusConflict {
+		t.Errorf("expected 409, got %d", w.Code)
+	}
+}
+
+func TestHandleGenerateAfter_Success(t *testing.T) {
+	srv, st := newTestServer(t)
+	auth := basicAuth("admin", "secret")
+	featureID := setupFeatureAtFullySpecified(t, srv, st, "genafter")
+
+	// Create a second feature to depend on
+	w := doRequest(t, srv, "POST", "/api/v1/projects/genafter/features",
+		map[string]any{"name": "other", "description": "desc"}, auth)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create other feature: %d", w.Code)
+	}
+	var other map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&other); err != nil {
+		t.Fatal(err)
+	}
+	otherID := other["id"].(string)
+
+	path := "/api/v1/projects/genafter/features/" + featureID + "/generate-after"
+	w = doRequest(t, srv, "POST", path, map[string]string{"after_feature_id": otherID}, auth)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp["status"] != "waiting" {
+		t.Errorf("expected status waiting, got %v", resp["status"])
+	}
+	if resp["generate_after"] != otherID {
+		t.Errorf("expected generate_after %q, got %v", otherID, resp["generate_after"])
+	}
+}
+
+func TestHandleGenerateAfter_MissingField(t *testing.T) {
+	srv, st := newTestServer(t)
+	auth := basicAuth("admin", "secret")
+	featureID := setupFeatureAtFullySpecified(t, srv, st, "genafter2")
+
+	path := "/api/v1/projects/genafter2/features/" + featureID + "/generate-after"
+	w := doRequest(t, srv, "POST", path, map[string]string{}, auth)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", w.Code)
+	}
+}
+
+func TestHandleStartGenerate_Success(t *testing.T) {
+	srv, st := newTestServer(t)
+	featureID := setupFeatureAtFullySpecified(t, srv, st, "startgen")
+	if err := st.TransitionStatus("startgen", featureID, model.StatusReadyToGenerate); err != nil {
+		t.Fatalf("transition: %v", err)
+	}
+	token := tokenForProject(t, st, "startgen")
+
+	w := doRequest(t, srv, "POST", "/api/v1/features/"+featureID+"/start-generate", nil, bearerAuth(token))
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp["status"] != "generating" {
+		t.Errorf("expected status generating, got %v", resp["status"])
+	}
+}
+
+func TestHandleStartGenerate_WrongStatus(t *testing.T) {
+	srv, st := newTestServer(t)
+	featureID := setupFeatureAtFullySpecified(t, srv, st, "startgen2")
+	token := tokenForProject(t, st, "startgen2")
+
+	// Feature is in fully_specified, not ready_to_generate
+	w := doRequest(t, srv, "POST", "/api/v1/features/"+featureID+"/start-generate", nil, bearerAuth(token))
+	if w.Code != http.StatusConflict {
+		t.Errorf("expected 409, got %d", w.Code)
+	}
+}
+
+func TestHandleRegisterBeads_Success(t *testing.T) {
+	srv, st := newTestServer(t)
+	featureID := setupFeatureAtFullySpecified(t, srv, st, "regbeads")
+	for _, s := range []model.FeatureStatus{model.StatusReadyToGenerate, model.StatusGenerating} {
+		if err := st.TransitionStatus("regbeads", featureID, s); err != nil {
+			t.Fatalf("transition to %v: %v", s, err)
+		}
+	}
+	token := tokenForProject(t, st, "regbeads")
+
+	w := doRequest(t, srv, "POST", "/api/v1/features/"+featureID+"/register-beads",
+		map[string]any{"bead_ids": []string{"bd-aaa1", "bd-bbb2"}}, bearerAuth(token))
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp["status"] != "beads_created" {
+		t.Errorf("expected status beads_created, got %v", resp["status"])
+	}
+	beadIDs, ok := resp["bead_ids"].([]any)
+	if !ok || len(beadIDs) != 2 {
+		t.Errorf("expected 2 bead_ids, got %v", resp["bead_ids"])
+	}
+}
+
+func TestHandleRegisterBeads_Empty(t *testing.T) {
+	srv, st := newTestServer(t)
+	featureID := setupFeatureAtFullySpecified(t, srv, st, "regbeads2")
+	token := tokenForProject(t, st, "regbeads2")
+
+	w := doRequest(t, srv, "POST", "/api/v1/features/"+featureID+"/register-beads",
+		map[string]any{"bead_ids": []string{}}, bearerAuth(token))
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", w.Code)
+	}
+}
+
+func TestHandleRegisterBeads_WrongStatus_DoesNotPersistBeadIDs(t *testing.T) {
+	// Feature is in fully_specified (not generating) — BeadIDs must not be persisted.
+	srv, st := newTestServer(t)
+	featureID := setupFeatureAtFullySpecified(t, srv, st, "regbeads3")
+	token := tokenForProject(t, st, "regbeads3")
+
+	w := doRequest(t, srv, "POST", "/api/v1/features/"+featureID+"/register-beads",
+		map[string]any{"bead_ids": []string{"bd-111"}}, bearerAuth(token))
+	if w.Code != http.StatusConflict {
+		t.Errorf("expected 409, got %d", w.Code)
+	}
+	f, err := st.GetFeature("regbeads3", featureID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(f.BeadIDs) != 0 {
+		t.Errorf("BeadIDs must not be persisted when status is wrong, got %v", f.BeadIDs)
+	}
+}
+
+func TestHandleGenerateAfter_WrongStatus_DoesNotPersistGenerateAfter(t *testing.T) {
+	// Feature is in draft (not fully_specified) — GenerateAfter must not be persisted.
+	srv, st := newTestServer(t)
+	_, featureID := setupFeatureWithStatus(t, srv, st, model.StatusDraft)
+	auth := basicAuth("admin", "secret")
+
+	path := "/api/v1/projects/dialogproj/features/" + featureID + "/generate-after"
+	w := doRequest(t, srv, "POST", path, map[string]string{"after_feature_id": "ft-other"}, auth)
+	if w.Code != http.StatusConflict {
+		t.Errorf("expected 409, got %d", w.Code)
+	}
+	f, err := st.GetFeature("dialogproj", featureID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.GenerateAfter != "" {
+		t.Errorf("GenerateAfter must not be persisted when status is wrong, got %q", f.GenerateAfter)
+	}
+}
+
+func TestHandleRegisterArtifact_Success(t *testing.T) {
+	srv, st := newTestServer(t)
+	featureID := setupFeatureAtFullySpecified(t, srv, st, "regartifact")
+	token := tokenForProject(t, st, "regartifact")
+
+	w := doRequest(t, srv, "POST", "/api/v1/features/"+featureID+"/register-artifact",
+		map[string]string{"type": "plan", "content": "# Plan\nDo stuff."}, bearerAuth(token))
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestHandleRegisterArtifact_InvalidType(t *testing.T) {
+	srv, st := newTestServer(t)
+	featureID := setupFeatureAtFullySpecified(t, srv, st, "regartifact2")
+	token := tokenForProject(t, st, "regartifact2")
+
+	w := doRequest(t, srv, "POST", "/api/v1/features/"+featureID+"/register-artifact",
+		map[string]string{"type": "invalid", "content": "stuff"}, bearerAuth(token))
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", w.Code)
+	}
+}
+
+func TestHandleRegisterArtifact_NoAuth(t *testing.T) {
+	srv, _ := newTestServer(t)
+	w := doRequest(t, srv, "POST", "/api/v1/features/ft-abc/register-artifact",
+		map[string]string{"type": "plan", "content": "stuff"}, nil)
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401, got %d", w.Code)
+	}
+}
+
+func TestHandleCompleteFeature_Success(t *testing.T) {
+	srv, st := newTestServer(t)
+	featureID := setupFeatureAtFullySpecified(t, srv, st, "complete1")
+	for _, s := range []model.FeatureStatus{model.StatusReadyToGenerate, model.StatusGenerating, model.StatusBeadsCreated} {
+		if err := st.TransitionStatus("complete1", featureID, s); err != nil {
+			t.Fatalf("transition to %v: %v", s, err)
+		}
+	}
+	token := tokenForProject(t, st, "complete1")
+
+	w := doRequest(t, srv, "POST", "/api/v1/features/"+featureID+"/complete", nil, bearerAuth(token))
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp["status"] != "done" {
+		t.Errorf("expected status done, got %v", resp["status"])
+	}
+}
+
+func TestHandleCompleteFeature_DependencyResolution(t *testing.T) {
+	srv, st := newTestServer(t)
+	auth := basicAuth("admin", "secret")
+
+	// Create project with two features
+	w := doRequest(t, srv, "POST", "/api/v1/projects", map[string]any{"name": "depres"}, auth)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create project: %d", w.Code)
+	}
+
+	w = doRequest(t, srv, "POST", "/api/v1/projects/depres/features",
+		map[string]any{"name": "provider", "description": "desc"}, auth)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create provider: %d", w.Code)
+	}
+	var provFeat map[string]any
+	json.NewDecoder(w.Body).Decode(&provFeat)
+	providerID := provFeat["id"].(string)
+
+	w = doRequest(t, srv, "POST", "/api/v1/projects/depres/features",
+		map[string]any{"name": "waiter", "description": "desc"}, auth)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create waiter: %d", w.Code)
+	}
+	var waiterFeat map[string]any
+	json.NewDecoder(w.Body).Decode(&waiterFeat)
+	waiterID := waiterFeat["id"].(string)
+
+	// Advance provider to beads_created
+	for _, s := range []model.FeatureStatus{model.StatusAwaitingClient, model.StatusFullySpecified, model.StatusReadyToGenerate, model.StatusGenerating, model.StatusBeadsCreated} {
+		if err := st.TransitionStatus("depres", providerID, s); err != nil {
+			t.Fatalf("transition provider to %v: %v", s, err)
+		}
+	}
+
+	// Set waiter to waiting with dependency on provider
+	if err := st.TransitionStatus("depres", waiterID, model.StatusAwaitingClient); err != nil {
+		t.Fatalf("transition waiter: %v", err)
+	}
+	if err := st.TransitionStatus("depres", waiterID, model.StatusFullySpecified); err != nil {
+		t.Fatalf("transition waiter: %v", err)
+	}
+	waiter, err := st.GetFeature("depres", waiterID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waiter.GenerateAfter = providerID
+	if err := st.UpdateFeature(waiter); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.TransitionStatus("depres", waiterID, model.StatusWaiting); err != nil {
+		t.Fatalf("transition waiter to waiting: %v", err)
+	}
+
+	// Complete the provider feature
+	token := tokenForProject(t, st, "depres")
+	w = doRequest(t, srv, "POST", "/api/v1/features/"+providerID+"/complete", nil, bearerAuth(token))
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Verify waiter is now ready_to_generate
+	waiterUpdated, err := st.GetFeature("depres", waiterID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if waiterUpdated.Status != model.StatusReadyToGenerate {
+		t.Errorf("expected waiter to be ready_to_generate after provider completes, got %v", waiterUpdated.Status)
+	}
+}
+
+func TestHandleCompleteFeature_WrongStatus(t *testing.T) {
+	srv, st := newTestServer(t)
+	featureID := setupFeatureAtFullySpecified(t, srv, st, "complete2")
+	token := tokenForProject(t, st, "complete2")
+
+	// Feature is in fully_specified, not beads_created
+	w := doRequest(t, srv, "POST", "/api/v1/features/"+featureID+"/complete", nil, bearerAuth(token))
+	if w.Code != http.StatusConflict {
+		t.Errorf("expected 409, got %d", w.Code)
+	}
+}

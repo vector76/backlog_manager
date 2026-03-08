@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -212,5 +213,153 @@ func TestShowCmd_ValidToken(t *testing.T) {
 	}
 	if result["initial_description"] == "" {
 		t.Error("expected non-empty initial_description")
+	}
+}
+
+func makeFeatureServer(t *testing.T, featureID, action string, handler http.HandlerFunc) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		expected := "/api/v1/features/" + featureID + "/" + action
+		if r.URL.Path != expected {
+			http.NotFound(w, r)
+			return
+		}
+		if !strings.HasPrefix(r.Header.Get("Authorization"), "Bearer ") {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		handler(w, r)
+	}))
+}
+
+func TestStartGenerateCmd(t *testing.T) {
+	ts := makeFeatureServer(t, "ft-abc", "start-generate", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"id": "ft-abc", "status": "generating"})
+	})
+	defer ts.Close()
+
+	os.Setenv("BM_URL", ts.URL)
+	os.Setenv("BM_TOKEN", "tok")
+	defer os.Unsetenv("BM_URL")
+	defer os.Unsetenv("BM_TOKEN")
+
+	var out bytes.Buffer
+	root := cli.NewRootCmd()
+	root.SetArgs([]string{"start-generate", "ft-abc"})
+	root.SetOut(&out)
+	if err := root.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var result map[string]any
+	if err := json.NewDecoder(&out).Decode(&result); err != nil {
+		t.Fatalf("expected JSON output: %s, err: %v", out.String(), err)
+	}
+	if result["status"] != "generating" {
+		t.Errorf("expected status generating, got %v", result["status"])
+	}
+}
+
+func TestStartGenerateCmd_NoToken(t *testing.T) {
+	os.Unsetenv("BM_TOKEN")
+	os.Unsetenv("BM_URL")
+	root := cli.NewRootCmd()
+	root.SetArgs([]string{"start-generate", "ft-abc"})
+	if err := root.Execute(); err == nil {
+		t.Error("expected error when BM_TOKEN not set")
+	}
+}
+
+func TestRegisterBeadsCmd(t *testing.T) {
+	ts := makeFeatureServer(t, "ft-abc", "register-beads", func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		json.NewDecoder(r.Body).Decode(&body)
+		ids, _ := body["bead_ids"].([]any)
+		if len(ids) != 2 {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"id": "ft-abc", "status": "beads_created", "bead_ids": ids})
+	})
+	defer ts.Close()
+
+	os.Setenv("BM_URL", ts.URL)
+	os.Setenv("BM_TOKEN", "tok")
+	defer os.Unsetenv("BM_URL")
+	defer os.Unsetenv("BM_TOKEN")
+
+	var out bytes.Buffer
+	root := cli.NewRootCmd()
+	root.SetArgs([]string{"register-beads", "ft-abc", "bd-111", "bd-222"})
+	root.SetOut(&out)
+	if err := root.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var result map[string]any
+	if err := json.NewDecoder(&out).Decode(&result); err != nil {
+		t.Fatalf("expected JSON output: %s, err: %v", out.String(), err)
+	}
+	if result["status"] != "beads_created" {
+		t.Errorf("expected status beads_created, got %v", result["status"])
+	}
+}
+
+func TestRegisterArtifactCmd(t *testing.T) {
+	ts := makeFeatureServer(t, "ft-abc", "register-artifact", func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]string
+		json.NewDecoder(r.Body).Decode(&body)
+		if body["type"] != "plan" || body["content"] == "" {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+	defer ts.Close()
+
+	os.Setenv("BM_URL", ts.URL)
+	os.Setenv("BM_TOKEN", "tok")
+	defer os.Unsetenv("BM_URL")
+	defer os.Unsetenv("BM_TOKEN")
+
+	// Write temp artifact file
+	dir := t.TempDir()
+	f := filepath.Join(dir, "plan.md")
+	os.WriteFile(f, []byte("# Plan\nDo stuff."), 0644)
+
+	var out bytes.Buffer
+	root := cli.NewRootCmd()
+	root.SetArgs([]string{"register-artifact", "ft-abc", "--type", "plan", "--file", f})
+	root.SetOut(&out)
+	if err := root.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestCompleteCmd(t *testing.T) {
+	ts := makeFeatureServer(t, "ft-abc", "complete", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"id": "ft-abc", "status": "done"})
+	})
+	defer ts.Close()
+
+	os.Setenv("BM_URL", ts.URL)
+	os.Setenv("BM_TOKEN", "tok")
+	defer os.Unsetenv("BM_URL")
+	defer os.Unsetenv("BM_TOKEN")
+
+	var out bytes.Buffer
+	root := cli.NewRootCmd()
+	root.SetArgs([]string{"complete", "ft-abc"})
+	root.SetOut(&out)
+	if err := root.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var result map[string]any
+	if err := json.NewDecoder(&out).Decode(&result); err != nil {
+		t.Fatalf("expected JSON output: %s, err: %v", out.String(), err)
+	}
+	if result["status"] != "done" {
+		t.Errorf("expected status done, got %v", result["status"])
 	}
 }
