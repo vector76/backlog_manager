@@ -1035,11 +1035,11 @@ func TestHandlePoll_RecordsConnectivity(t *testing.T) {
 	// Poll (timeout=1 to avoid blocking).
 	doRequest(t, srv, "GET", "/api/v1/poll?timeout=1", nil, bearerAuth(token))
 
-	// After poll: "Connected".
+	// After poll: "Connected (<1 min)".
 	w = doRequest(t, srv, "GET", "/api/v1/project", nil, bearerAuth(token))
 	json.NewDecoder(w.Body).Decode(&proj)
-	if proj["connectivity"] != "Connected" {
-		t.Errorf("expected connectivity=Connected after poll, got %v", proj["connectivity"])
+	if proj["connectivity"] != "Connected (<1 min)" {
+		t.Errorf("expected connectivity=Connected (<1 min) after poll, got %v", proj["connectivity"])
 	}
 }
 

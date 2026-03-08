@@ -13,7 +13,8 @@
     <div class="inline-form">
       <div class="form-group">
         <label for="name">Project name</label>
-        <input type="text" id="name" name="name" placeholder="my-project" pattern="[a-zA-Z0-9][a-zA-Z0-9_\-]*" required>
+        <input type="text" id="name" name="name" placeholder="my-project" pattern="[a-zA-Z0-9][a-zA-Z0-9_\-]*" title="Letters, digits, hyphens, and underscores only (no spaces)" required>
+        <small style="color:var(--muted)">Letters, digits, hyphens, underscores — no spaces</small>
       </div>
       <button type="submit" class="btn btn-primary">Create</button>
     </div>

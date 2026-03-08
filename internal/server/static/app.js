@@ -22,7 +22,7 @@
     var btn = document.getElementById("theme-toggle");
     if (!btn) return;
     var theme = document.documentElement.getAttribute("data-theme") || "light";
-    btn.textContent = theme === "dark" ? "☀" : "☾";
+    btn.textContent = theme === "dark" ? "☀️" : "🌙";
     btn.title = theme === "dark" ? "Switch to light mode" : "Switch to dark mode";
   }
 

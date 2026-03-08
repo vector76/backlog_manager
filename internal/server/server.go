@@ -217,19 +217,10 @@ func connectivityStatus(lastPoll time.Time) string {
 	}
 	elapsed := time.Since(lastPoll)
 	if elapsed <= 2*pollTimeout {
-		return "Connected"
+		return "Connected (<1 min)"
 	}
-	return "Last seen: " + humanDuration(elapsed) + " ago"
-}
-
-func humanDuration(d time.Duration) string {
-	if d < time.Minute {
-		return fmt.Sprintf("%ds", int(d.Seconds()))
-	}
-	if d < time.Hour {
-		return fmt.Sprintf("%dm%ds", int(d.Minutes()), int(d.Seconds())%60)
-	}
-	return fmt.Sprintf("%dh%dm", int(d.Hours()), int(d.Minutes())%60)
+	mins := int((elapsed + 30*time.Second) / time.Minute)
+	return fmt.Sprintf("Last seen: %d min ago", mins)
 }
 
 func handleCreateProject(st Store) http.HandlerFunc {
