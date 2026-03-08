@@ -40,7 +40,7 @@
       <span style="font-weight:600;font-size:1rem">{{.Name}}</span>
       <span class="muted" style="font-size:0.85rem">{{.FeatureCount}} feature{{if ne .FeatureCount 1}}s{{end}}</span>
       {{if .Connectivity}}
-        <span class="connectivity {{if eq .Connectivity "Connected"}}connected{{end}}">● {{.Connectivity}}</span>
+        <span class="connectivity {{if hasPrefix .Connectivity "Connected"}}connected{{end}}">● {{.Connectivity}}</span>
       {{else}}
         <span class="connectivity muted">○ Never connected</span>
       {{end}}

@@ -93,7 +93,7 @@ header nav a:hover { color: var(--fg); text-decoration: none; }
 .theme-btn:hover { background: var(--border); }
 
 .breadcrumb {
-  font-size: 0.85rem;
+  font-size: 0.9rem;
   color: var(--muted);
   padding: 0.5rem 1.5rem;
   border-bottom: 1px solid var(--border);
@@ -145,7 +145,7 @@ h3 { font-size: 1rem; font-weight: 600; margin-top: 1.2em; }
 
 .btn-primary { background: var(--accent); color: #fff; }
 .btn-secondary { background: var(--border); color: var(--fg); }
-.btn-sm { padding: 0.25rem 0.65rem; font-size: 0.8rem; }
+.btn-sm { padding: 0.25rem 0.65rem; font-size: 0.85rem; }
 .btn-danger { background: var(--danger); color: #fff; }
 
 .form-group {
@@ -227,7 +227,7 @@ input:focus, textarea:focus {
   display: inline-block;
   padding: 0.15rem 0.5rem;
   border-radius: 12px;
-  font-size: 0.78rem;
+  font-size: 0.85rem;
   font-weight: 500;
   white-space: nowrap;
 }
@@ -248,10 +248,10 @@ input:focus, textarea:focus {
 
 /* Connectivity */
 .connectivity {
-  font-size: 0.8rem;
+  font-size: 0.85rem;
   color: var(--muted);
 }
-.connectivity.connected { color: var(--success); }
+.connectivity.connected { color: var(--success); font-weight: 500; }
 
 /* Projects grid */
 .project-card details { border: none; background: none; }
@@ -286,7 +286,7 @@ input:focus, textarea:focus {
   border: 1px solid var(--border);
   background: var(--card-bg);
   color: var(--muted);
-  font-size: 0.8rem;
+  font-size: 0.85rem;
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
@@ -301,7 +301,7 @@ input:focus, textarea:focus {
 
 .status-group { margin-bottom: 1.5rem; }
 .status-group-title {
-  font-size: 0.8rem;
+  font-size: 0.85rem;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -320,7 +320,7 @@ input:focus, textarea:focus {
 }
 
 .stat-pill {
-  font-size: 0.78rem;
+  font-size: 0.85rem;
   padding: 0.1rem 0.5rem;
   border-radius: 10px;
   background: var(--border);
@@ -365,7 +365,7 @@ input:focus, textarea:focus {
 }
 
 .iteration-label {
-  font-size: 0.8rem;
+  font-size: 0.85rem;
   font-weight: 600;
   text-transform: uppercase;
   color: var(--muted);

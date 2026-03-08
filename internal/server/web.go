@@ -49,6 +49,7 @@ var templateFuncs = template.FuncMap{
 			return "badge-default"
 		}
 	},
+	"hasPrefix": strings.HasPrefix,
 	"statusLabel": func(status string) string {
 		labels := map[string]string{
 			"awaiting_human":   "Awaiting Human",
