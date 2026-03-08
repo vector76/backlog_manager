@@ -48,20 +48,6 @@ var validTransitions = map[model.FeatureStatus]map[model.FeatureStatus]bool{
 	model.StatusHalted:    {},
 }
 
-// IterationContent holds the content of a single dialog iteration (round >= 1).
-type IterationContent struct {
-	Round       int
-	Description string
-	Questions   string // empty if client submitted no questions
-	Response    string // empty until human responds
-}
-
-// FeatureDetail includes a Feature plus its full dialog history.
-type FeatureDetail struct {
-	model.Feature
-	InitialDescription string
-	Iterations         []IterationContent
-}
 
 // projectsRegistry is the JSON structure for projects.json.
 type projectsRegistry struct {
@@ -399,7 +385,7 @@ func (s *Store) GetFeature(projectName, featureID string) (*model.Feature, error
 }
 
 // GetFeatureDetail returns a feature along with its full dialog history read from disk.
-func (s *Store) GetFeatureDetail(projectName, featureID string) (*FeatureDetail, error) {
+func (s *Store) GetFeatureDetail(projectName, featureID string) (*model.FeatureDetail, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -409,7 +395,7 @@ func (s *Store) GetFeatureDetail(projectName, featureID string) (*FeatureDetail,
 	}
 	iterations := f.CurrentIteration
 
-	detail := &FeatureDetail{Feature: *f}
+	detail := &model.FeatureDetail{Feature: *f}
 
 	// Read initial description (v0)
 	v0, err := readFileOptional(s.descriptionPath(projectName, featureID, 0))
@@ -420,7 +406,7 @@ func (s *Store) GetFeatureDetail(projectName, featureID string) (*FeatureDetail,
 
 	// Read dialog rounds 1..N
 	for round := 1; round <= iterations; round++ {
-		ic := IterationContent{Round: round}
+		ic := model.IterationContent{Round: round}
 		ic.Description, err = readFileOptional(s.descriptionPath(projectName, featureID, round))
 		if err != nil {
 			return nil, err
@@ -437,6 +423,21 @@ func (s *Store) GetFeatureDetail(projectName, featureID string) (*FeatureDetail,
 	}
 
 	return detail, nil
+}
+
+// UpdateDescriptionV0 overwrites description_v0.md for a feature in draft status.
+func (s *Store) UpdateDescriptionV0(projectName, featureID, description string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	f, err := s.getFeatureLocked(projectName, featureID)
+	if err != nil {
+		return err
+	}
+	if f.Status != model.StatusDraft {
+		return fmt.Errorf("description can only be updated in draft status")
+	}
+	return os.WriteFile(s.descriptionPath(projectName, featureID, 0), []byte(description), 0644)
 }
 
 // UpdateFeature updates the metadata for a feature.

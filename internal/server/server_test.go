@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/vector76/backlog_manager/internal/config"
+	"github.com/vector76/backlog_manager/internal/model"
 	"github.com/vector76/backlog_manager/internal/server"
 	"github.com/vector76/backlog_manager/internal/store"
 )
@@ -245,6 +246,418 @@ func TestDeleteProject_NotFound(t *testing.T) {
 	w := doRequest(t, srv, "DELETE", "/api/v1/projects/nope", nil, basicAuth("admin", "secret"))
 	if w.Code != http.StatusNotFound {
 		t.Errorf("expected 404, got %d", w.Code)
+	}
+}
+
+// --- Feature CRUD (dashboard) ---
+
+func TestCreateFeature_Success(t *testing.T) {
+	srv, _ := newTestServer(t)
+	auth := basicAuth("admin", "secret")
+	doRequest(t, srv, "POST", "/api/v1/projects", map[string]any{"name": "proj"}, auth)
+
+	w := doRequest(t, srv, "POST", "/api/v1/projects/proj/features", map[string]any{
+		"name":        "My Feature",
+		"description": "# Feature\nSome description.",
+	}, auth)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp["name"] != "My Feature" {
+		t.Errorf("expected name 'My Feature', got %v", resp["name"])
+	}
+	if resp["status"] != "draft" {
+		t.Errorf("expected status draft, got %v", resp["status"])
+	}
+	id, _ := resp["id"].(string)
+	if id == "" {
+		t.Error("expected non-empty id")
+	}
+}
+
+func TestCreateFeature_ProjectNotFound(t *testing.T) {
+	srv, _ := newTestServer(t)
+	auth := basicAuth("admin", "secret")
+	w := doRequest(t, srv, "POST", "/api/v1/projects/nope/features", map[string]any{
+		"name": "f",
+	}, auth)
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected 404, got %d", w.Code)
+	}
+}
+
+func TestCreateFeature_MissingName(t *testing.T) {
+	srv, _ := newTestServer(t)
+	auth := basicAuth("admin", "secret")
+	doRequest(t, srv, "POST", "/api/v1/projects", map[string]any{"name": "proj"}, auth)
+	w := doRequest(t, srv, "POST", "/api/v1/projects/proj/features", map[string]any{}, auth)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", w.Code)
+	}
+}
+
+func TestListProjectFeatures_Empty(t *testing.T) {
+	srv, _ := newTestServer(t)
+	auth := basicAuth("admin", "secret")
+	doRequest(t, srv, "POST", "/api/v1/projects", map[string]any{"name": "proj"}, auth)
+
+	w := doRequest(t, srv, "GET", "/api/v1/projects/proj/features", nil, auth)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp []map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if len(resp) != 0 {
+		t.Errorf("expected empty list, got %d", len(resp))
+	}
+}
+
+func TestListProjectFeatures_WithStatusFilter(t *testing.T) {
+	srv, _ := newTestServer(t)
+	auth := basicAuth("admin", "secret")
+	doRequest(t, srv, "POST", "/api/v1/projects", map[string]any{"name": "proj"}, auth)
+	doRequest(t, srv, "POST", "/api/v1/projects/proj/features", map[string]any{"name": "f1"}, auth)
+	doRequest(t, srv, "POST", "/api/v1/projects/proj/features", map[string]any{"name": "f2"}, auth)
+
+	// Filter by draft — both should match
+	w := doRequest(t, srv, "GET", "/api/v1/projects/proj/features?status=draft", nil, auth)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var resp []map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if len(resp) != 2 {
+		t.Errorf("expected 2 draft features, got %d", len(resp))
+	}
+
+	// Filter by awaiting_client — none should match
+	w2 := doRequest(t, srv, "GET", "/api/v1/projects/proj/features?status=awaiting_client", nil, auth)
+	var resp2 []map[string]any
+	json.NewDecoder(w2.Body).Decode(&resp2)
+	if len(resp2) != 0 {
+		t.Errorf("expected 0 awaiting_client features, got %d", len(resp2))
+	}
+}
+
+func TestListProjectFeatures_MultiStatusFilter(t *testing.T) {
+	srv, _ := newTestServer(t)
+	auth := basicAuth("admin", "secret")
+	doRequest(t, srv, "POST", "/api/v1/projects", map[string]any{"name": "proj"}, auth)
+	doRequest(t, srv, "POST", "/api/v1/projects/proj/features", map[string]any{"name": "f1"}, auth)
+
+	w := doRequest(t, srv, "GET", "/api/v1/projects/proj/features?status=draft,abandoned", nil, auth)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var resp []map[string]any
+	json.NewDecoder(w.Body).Decode(&resp)
+	if len(resp) != 1 {
+		t.Errorf("expected 1 feature, got %d", len(resp))
+	}
+}
+
+func TestListProjectFeatures_InvalidStatusFilter(t *testing.T) {
+	srv, _ := newTestServer(t)
+	auth := basicAuth("admin", "secret")
+	doRequest(t, srv, "POST", "/api/v1/projects", map[string]any{"name": "proj"}, auth)
+
+	w := doRequest(t, srv, "GET", "/api/v1/projects/proj/features?status=notastatus", nil, auth)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for invalid status, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestClientListFeatures_InvalidStatusFilter(t *testing.T) {
+	srv, _ := newTestServer(t)
+	token := createProjectAndToken(t, srv, "proj2")
+
+	w := doRequest(t, srv, "GET", "/api/v1/features?status=bogus", nil, bearerAuth(token))
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for invalid status, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestGetProjectFeature_Detail(t *testing.T) {
+	srv, _ := newTestServer(t)
+	auth := basicAuth("admin", "secret")
+	doRequest(t, srv, "POST", "/api/v1/projects", map[string]any{"name": "proj"}, auth)
+	cw := doRequest(t, srv, "POST", "/api/v1/projects/proj/features", map[string]any{
+		"name":        "feat",
+		"description": "my desc",
+	}, auth)
+	var created map[string]any
+	json.NewDecoder(cw.Body).Decode(&created)
+	id := created["id"].(string)
+
+	w := doRequest(t, srv, "GET", "/api/v1/projects/proj/features/"+id, nil, auth)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp["id"] != id {
+		t.Errorf("expected id %q, got %v", id, resp["id"])
+	}
+	if resp["initial_description"] != "my desc" {
+		t.Errorf("expected initial_description 'my desc', got %v", resp["initial_description"])
+	}
+}
+
+func TestGetProjectFeature_NotFound(t *testing.T) {
+	srv, _ := newTestServer(t)
+	auth := basicAuth("admin", "secret")
+	doRequest(t, srv, "POST", "/api/v1/projects", map[string]any{"name": "proj"}, auth)
+	w := doRequest(t, srv, "GET", "/api/v1/projects/proj/features/ft-nope", nil, auth)
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected 404, got %d", w.Code)
+	}
+}
+
+func TestUpdateFeature_Name(t *testing.T) {
+	srv, _ := newTestServer(t)
+	auth := basicAuth("admin", "secret")
+	doRequest(t, srv, "POST", "/api/v1/projects", map[string]any{"name": "proj"}, auth)
+	cw := doRequest(t, srv, "POST", "/api/v1/projects/proj/features", map[string]any{"name": "old"}, auth)
+	var created map[string]any
+	json.NewDecoder(cw.Body).Decode(&created)
+	id := created["id"].(string)
+
+	w := doRequest(t, srv, "PATCH", "/api/v1/projects/proj/features/"+id, map[string]any{"name": "new name"}, auth)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp["name"] != "new name" {
+		t.Errorf("expected name 'new name', got %v", resp["name"])
+	}
+}
+
+func TestUpdateFeature_EmptyNameRejected(t *testing.T) {
+	srv, _ := newTestServer(t)
+	auth := basicAuth("admin", "secret")
+	doRequest(t, srv, "POST", "/api/v1/projects", map[string]any{"name": "proj"}, auth)
+	cw := doRequest(t, srv, "POST", "/api/v1/projects/proj/features", map[string]any{"name": "orig"}, auth)
+	var created map[string]any
+	json.NewDecoder(cw.Body).Decode(&created)
+	id := created["id"].(string)
+
+	w := doRequest(t, srv, "PATCH", "/api/v1/projects/proj/features/"+id, map[string]any{"name": ""}, auth)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for empty name, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestUpdateFeature_EmptyNameWithDescriptionLeavesDescriptionUnchanged(t *testing.T) {
+	// Sending both a valid description and an empty name should fail atomically —
+	// the description must not be written when name validation fails.
+	srv, _ := newTestServer(t)
+	auth := basicAuth("admin", "secret")
+	doRequest(t, srv, "POST", "/api/v1/projects", map[string]any{"name": "proj"}, auth)
+	cw := doRequest(t, srv, "POST", "/api/v1/projects/proj/features", map[string]any{
+		"name":        "orig",
+		"description": "original desc",
+	}, auth)
+	var created map[string]any
+	json.NewDecoder(cw.Body).Decode(&created)
+	id := created["id"].(string)
+
+	w := doRequest(t, srv, "PATCH", "/api/v1/projects/proj/features/"+id,
+		map[string]any{"name": "", "description": "should not be saved"}, auth)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Description must be unchanged
+	dw := doRequest(t, srv, "GET", "/api/v1/projects/proj/features/"+id, nil, auth)
+	var detail map[string]any
+	json.NewDecoder(dw.Body).Decode(&detail)
+	if detail["initial_description"] != "original desc" {
+		t.Errorf("description was mutated despite 400 response: got %v", detail["initial_description"])
+	}
+}
+
+func TestUpdateFeature_DescriptionInDraft(t *testing.T) {
+	srv, _ := newTestServer(t)
+	auth := basicAuth("admin", "secret")
+	doRequest(t, srv, "POST", "/api/v1/projects", map[string]any{"name": "proj"}, auth)
+	cw := doRequest(t, srv, "POST", "/api/v1/projects/proj/features", map[string]any{
+		"name":        "feat",
+		"description": "old desc",
+	}, auth)
+	var created map[string]any
+	json.NewDecoder(cw.Body).Decode(&created)
+	id := created["id"].(string)
+
+	w := doRequest(t, srv, "PATCH", "/api/v1/projects/proj/features/"+id, map[string]any{"description": "new desc"}, auth)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Verify description updated via GET
+	dw := doRequest(t, srv, "GET", "/api/v1/projects/proj/features/"+id, nil, auth)
+	var detail map[string]any
+	json.NewDecoder(dw.Body).Decode(&detail)
+	if detail["initial_description"] != "new desc" {
+		t.Errorf("expected updated description, got %v", detail["initial_description"])
+	}
+}
+
+func TestUpdateFeature_DescriptionRejectedWhenNotDraft(t *testing.T) {
+	srv, st := newTestServer(t)
+	auth := basicAuth("admin", "secret")
+	doRequest(t, srv, "POST", "/api/v1/projects", map[string]any{"name": "proj"}, auth)
+	cw := doRequest(t, srv, "POST", "/api/v1/projects/proj/features", map[string]any{
+		"name":        "feat",
+		"description": "orig",
+	}, auth)
+	var created map[string]any
+	json.NewDecoder(cw.Body).Decode(&created)
+	id := created["id"].(string)
+
+	// Transition to awaiting_client so it's no longer draft
+	if err := st.TransitionStatus("proj", id, model.StatusAwaitingClient); err != nil {
+		t.Fatalf("transition: %v", err)
+	}
+
+	w := doRequest(t, srv, "PATCH", "/api/v1/projects/proj/features/"+id, map[string]any{"description": "new"}, auth)
+	if w.Code != http.StatusConflict {
+		t.Errorf("expected 409, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestAbandonFeature(t *testing.T) {
+	srv, _ := newTestServer(t)
+	auth := basicAuth("admin", "secret")
+	doRequest(t, srv, "POST", "/api/v1/projects", map[string]any{"name": "proj"}, auth)
+	cw := doRequest(t, srv, "POST", "/api/v1/projects/proj/features", map[string]any{"name": "feat"}, auth)
+	var created map[string]any
+	json.NewDecoder(cw.Body).Decode(&created)
+	id := created["id"].(string)
+
+	w := doRequest(t, srv, "DELETE", "/api/v1/projects/proj/features/"+id, nil, auth)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Verify status is abandoned
+	dw := doRequest(t, srv, "GET", "/api/v1/projects/proj/features/"+id, nil, auth)
+	var detail map[string]any
+	json.NewDecoder(dw.Body).Decode(&detail)
+	if detail["status"] != "abandoned" {
+		t.Errorf("expected status abandoned, got %v", detail["status"])
+	}
+}
+
+func TestAbandonFeature_NotFound(t *testing.T) {
+	srv, _ := newTestServer(t)
+	auth := basicAuth("admin", "secret")
+	doRequest(t, srv, "POST", "/api/v1/projects", map[string]any{"name": "proj"}, auth)
+	w := doRequest(t, srv, "DELETE", "/api/v1/projects/proj/features/ft-nope", nil, auth)
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected 404, got %d", w.Code)
+	}
+}
+
+// --- Client feature endpoints (token auth) ---
+
+func createProjectAndToken(t *testing.T, srv *http.Server, projectName string) string {
+	t.Helper()
+	auth := basicAuth("admin", "secret")
+	w := doRequest(t, srv, "POST", "/api/v1/projects", map[string]any{"name": projectName}, auth)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create project: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	json.NewDecoder(w.Body).Decode(&resp)
+	return resp["token"].(string)
+}
+
+func TestClientListFeatures(t *testing.T) {
+	srv, _ := newTestServer(t)
+	token := createProjectAndToken(t, srv, "clientproj")
+	auth := basicAuth("admin", "secret")
+
+	doRequest(t, srv, "POST", "/api/v1/projects/clientproj/features", map[string]any{"name": "f1"}, auth)
+	doRequest(t, srv, "POST", "/api/v1/projects/clientproj/features", map[string]any{"name": "f2"}, auth)
+
+	w := doRequest(t, srv, "GET", "/api/v1/features", nil, bearerAuth(token))
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp []map[string]any
+	json.NewDecoder(w.Body).Decode(&resp)
+	if len(resp) != 2 {
+		t.Errorf("expected 2 features, got %d", len(resp))
+	}
+}
+
+func TestClientListFeatures_NoToken(t *testing.T) {
+	srv, _ := newTestServer(t)
+	w := doRequest(t, srv, "GET", "/api/v1/features", nil, nil)
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401, got %d", w.Code)
+	}
+}
+
+func TestClientGetFeatureDetail(t *testing.T) {
+	srv, _ := newTestServer(t)
+	token := createProjectAndToken(t, srv, "clientproj")
+	auth := basicAuth("admin", "secret")
+
+	cw := doRequest(t, srv, "POST", "/api/v1/projects/clientproj/features", map[string]any{
+		"name":        "feat",
+		"description": "hello",
+	}, auth)
+	var created map[string]any
+	json.NewDecoder(cw.Body).Decode(&created)
+	id := created["id"].(string)
+
+	w := doRequest(t, srv, "GET", "/api/v1/features/"+id, nil, bearerAuth(token))
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp["id"] != id {
+		t.Errorf("expected id %q, got %v", id, resp["id"])
+	}
+	if resp["initial_description"] != "hello" {
+		t.Errorf("expected initial_description 'hello', got %v", resp["initial_description"])
+	}
+}
+
+func TestClientGetFeatureDetail_NotFound(t *testing.T) {
+	srv, _ := newTestServer(t)
+	token := createProjectAndToken(t, srv, "clientproj")
+	w := doRequest(t, srv, "GET", "/api/v1/features/ft-nope", nil, bearerAuth(token))
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected 404, got %d", w.Code)
+	}
+}
+
+func TestClientListFeatures_StatusFilter(t *testing.T) {
+	srv, _ := newTestServer(t)
+	token := createProjectAndToken(t, srv, "clientproj")
+	auth := basicAuth("admin", "secret")
+	doRequest(t, srv, "POST", "/api/v1/projects/clientproj/features", map[string]any{"name": "f1"}, auth)
+
+	w := doRequest(t, srv, "GET", "/api/v1/features?status=draft", nil, bearerAuth(token))
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var resp []map[string]any
+	json.NewDecoder(w.Body).Decode(&resp)
+	if len(resp) != 1 {
+		t.Errorf("expected 1 feature, got %d", len(resp))
 	}
 }
 

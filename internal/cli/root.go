@@ -9,5 +9,7 @@ func NewRootCmd() *cobra.Command {
 	}
 	root.AddCommand(newServeCmd())
 	root.AddCommand(newStatusCmd())
+	root.AddCommand(newFeaturesCmd())
+	root.AddCommand(newShowCmd())
 	return root
 }

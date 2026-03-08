@@ -32,3 +32,18 @@ type DialogIteration struct {
 	IsFinal   bool      `json:"is_final"`
 	CreatedAt time.Time `json:"created_at"`
 }
+
+// IterationContent holds the content of a single dialog iteration (round >= 1).
+type IterationContent struct {
+	Round       int    `json:"round"`
+	Description string `json:"description,omitempty"`
+	Questions   string `json:"questions,omitempty"`
+	Response    string `json:"response,omitempty"`
+}
+
+// FeatureDetail includes a Feature plus its full dialog history read from disk.
+type FeatureDetail struct {
+	Feature
+	InitialDescription string             `json:"initial_description"`
+	Iterations         []IterationContent `json:"iterations,omitempty"`
+}

@@ -79,6 +79,69 @@ func (c *Client) GetOwnProject() (map[string]any, error) {
 	return result, nil
 }
 
+// ListFeatures calls GET /api/v1/features and returns the parsed response.
+// statusFilter is an optional comma-separated list of statuses (e.g. "draft,awaiting_client").
+func (c *Client) ListFeatures(statusFilter string) ([]map[string]any, error) {
+	url := c.BaseURL + "/api/v1/features"
+	if statusFilter != "" {
+		url += "?status=" + statusFilter
+	}
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("build request: %w", err)
+	}
+	if c.Token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.Token)
+	}
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		var errResp map[string]string
+		json.NewDecoder(resp.Body).Decode(&errResp)
+		if msg, ok := errResp["error"]; ok {
+			return nil, fmt.Errorf("server error (%d): %s", resp.StatusCode, msg)
+		}
+		return nil, fmt.Errorf("unexpected status: %d", resp.StatusCode)
+	}
+	var result []map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
+	}
+	return result, nil
+}
+
+// GetFeatureDetail calls GET /api/v1/features/{id} and returns the parsed response.
+func (c *Client) GetFeatureDetail(featureID string) (map[string]any, error) {
+	req, err := http.NewRequest("GET", c.BaseURL+"/api/v1/features/"+featureID, nil)
+	if err != nil {
+		return nil, fmt.Errorf("build request: %w", err)
+	}
+	if c.Token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.Token)
+	}
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		var errResp map[string]string
+		json.NewDecoder(resp.Body).Decode(&errResp)
+		if msg, ok := errResp["error"]; ok {
+			return nil, fmt.Errorf("server error (%d): %s", resp.StatusCode, msg)
+		}
+		return nil, fmt.Errorf("unexpected status: %d", resp.StatusCode)
+	}
+	var result map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
+	}
+	return result, nil
+}
+
 // loadEnv returns a map of environment variables, merging .env file as fallback.
 // Environment variables take priority over .env file values.
 func loadEnv() map[string]string {

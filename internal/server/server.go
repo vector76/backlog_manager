@@ -30,6 +30,11 @@ type Store interface {
 	DeleteProject(name string) error
 	GetProjectByToken(token string) (*model.Project, error)
 	ListFeatures(projectName string, statusFilter *model.FeatureStatus) ([]model.Feature, error)
+	CreateFeature(projectName, featureName, description string) (*model.Feature, error)
+	GetFeature(projectName, featureID string) (*model.Feature, error)
+	GetFeatureDetail(projectName, featureID string) (*model.FeatureDetail, error)
+	UpdateFeature(updated *model.Feature) error
+	UpdateDescriptionV0(projectName, featureID, description string) error
 }
 
 type contextKey string
@@ -51,12 +56,19 @@ func New(cfg *config.Config, st Store) *http.Server {
 		r.Get("/api/v1/projects", handleListProjects(st))
 		r.Get("/api/v1/projects/{name}", handleGetProject(st))
 		r.Delete("/api/v1/projects/{name}", handleDeleteProject(st))
+		r.Post("/api/v1/projects/{name}/features", handleCreateFeature(st))
+		r.Get("/api/v1/projects/{name}/features", handleListProjectFeatures(st))
+		r.Get("/api/v1/projects/{name}/features/{id}", handleGetProjectFeature(st))
+		r.Patch("/api/v1/projects/{name}/features/{id}", handleUpdateFeature(st))
+		r.Delete("/api/v1/projects/{name}/features/{id}", handleAbandonFeature(st))
 	})
 
 	// Token auth routes
 	r.Group(func(r chi.Router) {
 		r.Use(tokenAuthMiddleware(st))
 		r.Get("/api/v1/project", handleGetOwnProject(st))
+		r.Get("/api/v1/features", handleListClientFeatures(st))
+		r.Get("/api/v1/features/{id}", handleGetClientFeature(st))
 	})
 
 	return &http.Server{
@@ -236,6 +248,291 @@ func handleGetOwnProject(st Store) http.HandlerFunc {
 			Name:         project.Name,
 			FeatureCount: len(features),
 		})
+	}
+}
+
+// --- Feature request/response types ---
+
+type createFeatureRequest struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
+type updateFeatureRequest struct {
+	Name        *string `json:"name"`
+	Description *string `json:"description"`
+}
+
+// featureResponse is the JSON representation of a feature for API responses.
+type featureResponse struct {
+	ID               string             `json:"id"`
+	Project          string             `json:"project"`
+	Name             string             `json:"name"`
+	Status           string             `json:"status"`
+	CurrentIteration int                `json:"current_iteration"`
+	CreatedAt        string             `json:"created_at"`
+	UpdatedAt        string             `json:"updated_at"`
+}
+
+// featureDetailResponse extends featureResponse with description content and history.
+type featureDetailResponse struct {
+	featureResponse
+	InitialDescription string                   `json:"initial_description"`
+	Iterations         []model.IterationContent `json:"iterations,omitempty"`
+}
+
+func toFeatureResponse(f model.Feature) featureResponse {
+	return featureResponse{
+		ID:               f.ID,
+		Project:          f.Project,
+		Name:             f.Name,
+		Status:           f.Status.String(),
+		CurrentIteration: f.CurrentIteration,
+		CreatedAt:        f.CreatedAt.Format("2006-01-02T15:04:05Z"),
+		UpdatedAt:        f.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+	}
+}
+
+func toFeatureDetailResponse(d *model.FeatureDetail) featureDetailResponse {
+	return featureDetailResponse{
+		featureResponse:    toFeatureResponse(d.Feature),
+		InitialDescription: d.InitialDescription,
+		Iterations:         d.Iterations,
+	}
+}
+
+// parseStatusFilter parses a comma-separated ?status= query param into a slice of FeatureStatus.
+// Returns nil if the param is absent or empty (meaning no filter).
+func parseStatusFilter(r *http.Request) ([]model.FeatureStatus, error) {
+	raw := r.URL.Query().Get("status")
+	if raw == "" {
+		return nil, nil
+	}
+	parts := strings.Split(raw, ",")
+	statuses := make([]model.FeatureStatus, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		data, _ := json.Marshal(p)
+		var fs model.FeatureStatus
+		if err := fs.UnmarshalJSON(data); err != nil {
+			return nil, fmt.Errorf("unknown status %q", p)
+		}
+		statuses = append(statuses, fs)
+	}
+	return statuses, nil
+}
+
+func filterByStatuses(features []model.Feature, statuses []model.FeatureStatus) []model.Feature {
+	if len(statuses) == 0 {
+		return features
+	}
+	set := make(map[model.FeatureStatus]bool, len(statuses))
+	for _, s := range statuses {
+		set[s] = true
+	}
+	var result []model.Feature
+	for _, f := range features {
+		if set[f.Status] {
+			result = append(result, f)
+		}
+	}
+	return result
+}
+
+// --- Dashboard feature handlers ---
+
+func handleCreateFeature(st Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		projectName := chi.URLParam(r, "name")
+		if _, err := st.GetProject(projectName); err != nil {
+			writeError(w, http.StatusNotFound, "project not found")
+			return
+		}
+		var req createFeatureRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+		if req.Name == "" {
+			writeError(w, http.StatusBadRequest, "name is required")
+			return
+		}
+		f, err := st.CreateFeature(projectName, req.Name, req.Description)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "internal error")
+			return
+		}
+		writeJSON(w, http.StatusCreated, toFeatureResponse(*f))
+	}
+}
+
+func handleListProjectFeatures(st Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		projectName := chi.URLParam(r, "name")
+		if _, err := st.GetProject(projectName); err != nil {
+			writeError(w, http.StatusNotFound, "project not found")
+			return
+		}
+		statuses, err := parseStatusFilter(r)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		all, err := st.ListFeatures(projectName, nil)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "internal error")
+			return
+		}
+		filtered := filterByStatuses(all, statuses)
+		resp := make([]featureResponse, 0, len(filtered))
+		for _, f := range filtered {
+			resp = append(resp, toFeatureResponse(f))
+		}
+		writeJSON(w, http.StatusOK, resp)
+	}
+}
+
+func handleGetProjectFeature(st Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		projectName := chi.URLParam(r, "name")
+		featureID := chi.URLParam(r, "id")
+		detail, err := st.GetFeatureDetail(projectName, featureID)
+		if err != nil {
+			if strings.Contains(err.Error(), "not found") {
+				writeError(w, http.StatusNotFound, err.Error())
+			} else {
+				writeError(w, http.StatusInternalServerError, "internal error")
+			}
+			return
+		}
+		writeJSON(w, http.StatusOK, toFeatureDetailResponse(detail))
+	}
+}
+
+func handleUpdateFeature(st Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		projectName := chi.URLParam(r, "name")
+		featureID := chi.URLParam(r, "id")
+		var req updateFeatureRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+		f, err := st.GetFeature(projectName, featureID)
+		if err != nil {
+			if strings.Contains(err.Error(), "not found") {
+				writeError(w, http.StatusNotFound, err.Error())
+			} else {
+				writeError(w, http.StatusInternalServerError, "internal error")
+			}
+			return
+		}
+		// Validate all inputs before performing any writes.
+		if req.Name != nil && *req.Name == "" {
+			writeError(w, http.StatusBadRequest, "name cannot be empty")
+			return
+		}
+		if req.Description != nil && f.Status != model.StatusDraft {
+			writeError(w, http.StatusConflict, "description can only be updated in draft status")
+			return
+		}
+
+		if req.Description != nil {
+			if err := st.UpdateDescriptionV0(projectName, featureID, *req.Description); err != nil {
+				writeError(w, http.StatusInternalServerError, "internal error")
+				return
+			}
+		}
+		if req.Name != nil {
+			f.Name = *req.Name
+		}
+		if req.Name != nil || req.Description != nil {
+			if err := st.UpdateFeature(f); err != nil {
+				writeError(w, http.StatusInternalServerError, "internal error")
+				return
+			}
+		}
+		// Re-fetch after updates
+		updated, err := st.GetFeature(projectName, featureID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "internal error")
+			return
+		}
+		writeJSON(w, http.StatusOK, toFeatureResponse(*updated))
+	}
+}
+
+func handleAbandonFeature(st Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		projectName := chi.URLParam(r, "name")
+		featureID := chi.URLParam(r, "id")
+		f, err := st.GetFeature(projectName, featureID)
+		if err != nil {
+			if strings.Contains(err.Error(), "not found") {
+				writeError(w, http.StatusNotFound, err.Error())
+			} else {
+				writeError(w, http.StatusInternalServerError, "internal error")
+			}
+			return
+		}
+		f.Status = model.StatusAbandoned
+		if err := st.UpdateFeature(f); err != nil {
+			writeError(w, http.StatusInternalServerError, "internal error")
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+// --- Client feature handlers ---
+
+func handleListClientFeatures(st Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		project, ok := r.Context().Value(projectContextKey).(*model.Project)
+		if !ok || project == nil {
+			writeError(w, http.StatusInternalServerError, "internal error")
+			return
+		}
+		statuses, err := parseStatusFilter(r)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		all, err := st.ListFeatures(project.Name, nil)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "internal error")
+			return
+		}
+		filtered := filterByStatuses(all, statuses)
+		resp := make([]featureResponse, 0, len(filtered))
+		for _, f := range filtered {
+			resp = append(resp, toFeatureResponse(f))
+		}
+		writeJSON(w, http.StatusOK, resp)
+	}
+}
+
+func handleGetClientFeature(st Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		project, ok := r.Context().Value(projectContextKey).(*model.Project)
+		if !ok || project == nil {
+			writeError(w, http.StatusInternalServerError, "internal error")
+			return
+		}
+		featureID := chi.URLParam(r, "id")
+		detail, err := st.GetFeatureDetail(project.Name, featureID)
+		if err != nil {
+			if strings.Contains(err.Error(), "not found") {
+				writeError(w, http.StatusNotFound, err.Error())
+			} else {
+				writeError(w, http.StatusInternalServerError, "internal error")
+			}
+			return
+		}
+		writeJSON(w, http.StatusOK, toFeatureDetailResponse(detail))
 	}
 }
 

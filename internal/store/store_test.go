@@ -282,6 +282,52 @@ func TestDeleteFeatureNotFound(t *testing.T) {
 	}
 }
 
+func TestUpdateDescriptionV0_InDraft(t *testing.T) {
+	s := newTestStore(t)
+	if _, err := s.CreateProject("p", "tok"); err != nil {
+		t.Fatal(err)
+	}
+	f, err := s.CreateFeature("p", "feat", "original")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.UpdateDescriptionV0("p", f.ID, "updated"); err != nil {
+		t.Fatal(err)
+	}
+	content, err := s.ReadDescriptionVersion("p", f.ID, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if content != "updated" {
+		t.Errorf("expected 'updated', got %q", content)
+	}
+}
+
+func TestUpdateDescriptionV0_NotDraft(t *testing.T) {
+	s := newTestStore(t)
+	if _, err := s.CreateProject("p", "tok"); err != nil {
+		t.Fatal(err)
+	}
+	f, err := s.CreateFeature("p", "feat", "original")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.TransitionStatus("p", f.ID, model.StatusAwaitingClient); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.UpdateDescriptionV0("p", f.ID, "updated"); err == nil {
+		t.Error("expected error updating description of non-draft feature")
+	}
+	// Original content should be unchanged
+	content, err := s.ReadDescriptionVersion("p", f.ID, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if content != "original" {
+		t.Errorf("expected 'original' unchanged, got %q", content)
+	}
+}
+
 // --- Dialog iteration management ---
 
 func TestWriteAndReadClientRound(t *testing.T) {
