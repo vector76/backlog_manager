@@ -1659,6 +1659,32 @@ func TestHandleRegisterArtifact_NoAuth(t *testing.T) {
 	}
 }
 
+func TestHandleRegisterArtifact_UpdatesLastSeen(t *testing.T) {
+	srv, st := newTestServer(t)
+	_, err := st.CreateProject("poll-project", "tok-poll")
+	if err != nil {
+		t.Fatalf("CreateProject: %v", err)
+	}
+	f, err := st.CreateFeature("poll-project", "Poll Feature", "desc")
+	if err != nil {
+		t.Fatalf("CreateFeature: %v", err)
+	}
+
+	w := doRequest(t, srv, "POST", "/api/v1/features/"+f.ID+"/register-artifact",
+		map[string]any{"type": "plan", "content": "# Plan"}, bearerAuth("tok-poll"))
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d: %s", w.Code, w.Body.String())
+	}
+
+	ts, ok := st.GetLastPollTime("poll-project")
+	if !ok {
+		t.Fatal("expected poll time to be recorded, but ok == false")
+	}
+	if ts.IsZero() {
+		t.Fatal("expected non-zero poll time")
+	}
+}
+
 func TestHandleCompleteFeature_Success(t *testing.T) {
 	srv, st := newTestServer(t)
 	featureID := setupFeatureAtFullySpecified(t, srv, st, "complete1")

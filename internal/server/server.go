@@ -1165,6 +1165,7 @@ func handleRegisterArtifact(st Store) http.HandlerFunc {
 			}
 			return
 		}
+		st.RecordPoll(project.Name)
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
