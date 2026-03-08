@@ -176,8 +176,8 @@ type projectDashData struct {
 	Name         string
 	FeatureCount int
 	Connectivity string
-	StatCounts   []statCount
 	JustCreated  bool
+	Groups       []featureGroupData
 }
 
 type newProjectInfo struct {
@@ -191,7 +191,7 @@ type dashboardPageData struct {
 	NewProject *newProjectInfo
 }
 
-func handleWebDashboard(st Store) http.HandlerFunc {
+func handleWebDashboard(st Store, monitor *BeadMonitor) http.HandlerFunc {
 	tmpl := mustParseTemplate("dashboard")
 	return func(w http.ResponseWriter, r *http.Request) {
 		projects := st.ListProjects()
@@ -210,25 +210,41 @@ func handleWebDashboard(st Store) http.HandlerFunc {
 			features, _ := st.ListFeatures(p.Name, nil)
 			lastPoll, _ := st.GetLastPollTime(p.Name)
 
-			// Count by status.
-			counts := make(map[string]int)
+			byStatus := make(map[model.FeatureStatus][]featureRowData)
 			for _, f := range features {
-				counts[f.Status.String()]++
-			}
-			var sc []statCount
-			for _, s := range statusOrder {
-				key := s.String()
-				if n, ok := counts[key]; ok && n > 0 {
-					sc = append(sc, statCount{Status: key, Count: n})
+				row := featureRowData{
+					ID:        f.ID,
+					Name:      f.Name,
+					Status:    f.Status.String(),
+					UpdatedAt: f.UpdatedAt.Format("2006-01-02 15:04"),
 				}
+				if f.Status == model.StatusBeadsCreated && monitor != nil {
+					row.BeadInfo = beadInfoString(f.ID, monitor)
+				}
+				byStatus[f.Status] = append(byStatus[f.Status], row)
+			}
+
+			var groups []featureGroupData
+			for _, s := range statusOrder {
+				rows, ok := byStatus[s]
+				if !ok || len(rows) == 0 {
+					continue
+				}
+				sort.Slice(rows, func(i, j int) bool {
+					return rows[i].UpdatedAt > rows[j].UpdatedAt
+				})
+				groups = append(groups, featureGroupData{
+					Status:   s.String(),
+					Features: rows,
+				})
 			}
 
 			dashProjects = append(dashProjects, projectDashData{
 				Name:         p.Name,
 				FeatureCount: len(features),
 				Connectivity: connectivityStatus(lastPoll),
-				StatCounts:   sc,
 				JustCreated:  newProj != nil && p.Name == newProj.Name,
+				Groups:       groups,
 			})
 		}
 

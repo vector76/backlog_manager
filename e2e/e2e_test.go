@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/vector76/backlog_manager/internal/config"
@@ -418,14 +419,14 @@ func TestE2EConnectivity(t *testing.T) {
 	// After poll: should be "Connected".
 	resp = s.do(t, "GET", "/api/v1/project", nil, s.bearerAuth())
 	decode(t, resp, &proj)
-	if proj["connectivity"] != "Connected" {
-		t.Errorf("expected connectivity=Connected after poll, got %v", proj["connectivity"])
+	if connectivity, ok := proj["connectivity"].(string); !ok || !strings.HasPrefix(connectivity, "Connected") {
+		t.Errorf("expected connectivity to start with Connected after poll, got %v", proj["connectivity"])
 	}
 
 	// Dashboard should also see connectivity.
 	resp = s.do(t, "GET", fmt.Sprintf("/api/v1/projects/%s", projectName), nil, s.dashboardAuth())
 	decode(t, resp, &proj)
-	if proj["connectivity"] != "Connected" {
-		t.Errorf("expected connectivity=Connected in dashboard view, got %v", proj["connectivity"])
+	if connectivity, ok := proj["connectivity"].(string); !ok || !strings.HasPrefix(connectivity, "Connected") {
+		t.Errorf("expected connectivity to start with Connected in dashboard view, got %v", proj["connectivity"])
 	}
 }

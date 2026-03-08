@@ -116,7 +116,7 @@ func New(cfg *config.Config, st Store, monitors ...*BeadMonitor) *http.Server {
 	r.Get("/logout", handleWebLogout(sessions))
 	r.Group(func(r chi.Router) {
 		r.Use(webSessionMiddleware(sessions))
-		r.Get("/", handleWebDashboard(st))
+		r.Get("/", handleWebDashboard(st, monitor))
 		r.Post("/projects", handleWebCreateProject(st))
 		r.Get("/project/{name}", handleWebProject(st, monitor))
 		r.Get("/project/{name}/new", handleWebNewFeature(st))

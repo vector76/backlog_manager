@@ -414,8 +414,8 @@ func TestWebFeatureAwaitingHumanActions(t *testing.T) {
 	if !strings.Contains(body, "Send Response") {
 		t.Errorf("expected Send Response button for awaiting_human feature")
 	}
-	if !strings.Contains(body, "Final Answer") {
-		t.Errorf("expected Final Answer button for awaiting_human feature")
+	if !strings.Contains(body, "Final answer") {
+		t.Errorf("expected Final answer checkbox for awaiting_human feature")
 	}
 	if !strings.Contains(body, "What is the scope?") {
 		t.Errorf("expected client questions displayed prominently")
@@ -479,7 +479,7 @@ func TestWebFeatureRespondFinal(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	body := url.Values{"response": {"Final answer."}, "final": {"true"}}.Encode()
+	body := url.Values{"response": {"Final answer."}, "final": {"on"}}.Encode()
 	w := webRequest(t, srv, "POST", "/project/final-project/feature/"+f.ID+"/respond", body, cookie)
 	if w.Code != http.StatusFound {
 		t.Fatalf("expected 302 redirect, got %d", w.Code)

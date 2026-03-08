@@ -1136,6 +1136,88 @@ func TestHandleGetPending_WrongStatus(t *testing.T) {
 	}
 }
 
+func TestHandleGetPending_IsFinalFlag(t *testing.T) {
+	srv, st := newTestServer(t)
+	projectName, featureID := setupFeatureWithStatus(t, srv, st, model.StatusAwaitingHuman)
+	token := tokenForProject(t, st, projectName)
+
+	// Respond with final=true → feature becomes awaiting_client.
+	if err := st.RespondToDialog(projectName, featureID, "final answer", true); err != nil {
+		t.Fatal(err)
+	}
+
+	w := doRequest(t, srv, "GET",
+		"/api/v1/features/"+featureID+"/pending", nil, bearerAuth(token))
+	if w.Code != http.StatusOK {
+		t.Fatalf("pending: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	json.NewDecoder(w.Body).Decode(&resp)
+
+	if resp["is_final"] != true {
+		t.Errorf("expected is_final=true after final response, got %v", resp["is_final"])
+	}
+}
+
+func TestHandleGetPending_IsFinalFalseWhenNotFinal(t *testing.T) {
+	srv, st := newTestServer(t)
+	projectName, featureID := setupFeatureWithStatus(t, srv, st, model.StatusAwaitingHuman)
+	token := tokenForProject(t, st, projectName)
+
+	// Respond with final=false → feature becomes awaiting_client.
+	if err := st.RespondToDialog(projectName, featureID, "my answer", false); err != nil {
+		t.Fatal(err)
+	}
+
+	w := doRequest(t, srv, "GET",
+		"/api/v1/features/"+featureID+"/pending", nil, bearerAuth(token))
+	if w.Code != http.StatusOK {
+		t.Fatalf("pending: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	json.NewDecoder(w.Body).Decode(&resp)
+
+	if resp["is_final"] == true {
+		t.Errorf("expected is_final=false for non-final response, got %v", resp["is_final"])
+	}
+}
+
+func TestHandleGetPending_AfterReopen(t *testing.T) {
+	srv, st := newTestServer(t)
+	auth := basicAuth("admin", "secret")
+	projectName, featureID := setupFeatureWithStatus(t, srv, st, model.StatusFullySpecified)
+	token := tokenForProject(t, st, projectName)
+
+	// Reopen the feature.
+	w := doRequest(t, srv, "POST",
+		"/api/v1/projects/"+projectName+"/features/"+featureID+"/reopen",
+		map[string]string{"message": "Actually, one more thing."}, auth)
+	if w.Code != http.StatusOK {
+		t.Fatalf("reopen: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	w = doRequest(t, srv, "GET",
+		"/api/v1/features/"+featureID+"/pending", nil, bearerAuth(token))
+	if w.Code != http.StatusOK {
+		t.Fatalf("pending after reopen: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	json.NewDecoder(w.Body).Decode(&resp)
+
+	if resp["feature_description"] == "" {
+		t.Error("expected non-empty feature_description after reopen")
+	}
+	if resp["user_response"] == "" {
+		t.Error("expected reopen message in user_response")
+	}
+	if resp["questions"] != "" && resp["questions"] != nil {
+		t.Errorf("expected empty questions in reopen case, got %v", resp["questions"])
+	}
+	if resp["is_final"] == true {
+		t.Errorf("expected is_final=false in reopen case, got %v", resp["is_final"])
+	}
+}
+
 func TestHandleGetPending_NoAuth(t *testing.T) {
 	srv, _ := newTestServer(t)
 	w := doRequest(t, srv, "GET", "/api/v1/features/ft-abc/pending", nil, nil)
@@ -1195,6 +1277,32 @@ func TestHandleSubmitDialog_ToFullySpecified(t *testing.T) {
 	json.NewDecoder(w.Body).Decode(&resp)
 	if resp["status"] != "fully_specified" {
 		t.Errorf("expected fully_specified, got %v", resp["status"])
+	}
+}
+
+func TestHandleSubmitDialog_WithQuestionsAfterFinalResponse(t *testing.T) {
+	srv, st := newTestServer(t)
+	auth := basicAuth("admin", "secret")
+	projectName, featureID := setupFeatureWithStatus(t, srv, st, model.StatusAwaitingHuman)
+	token := tokenForProject(t, st, projectName)
+
+	// Respond with final=true → awaiting_client.
+	doRequest(t, srv, "POST",
+		"/api/v1/projects/"+projectName+"/features/"+featureID+"/respond",
+		map[string]any{"response": "final answer", "final": true}, auth)
+
+	// Submit WITH questions despite final response → should stay awaiting_human, not fully_specified.
+	w := doRequest(t, srv, "POST",
+		"/api/v1/features/"+featureID+"/submit-dialog",
+		map[string]string{"updated_description": "desc", "questions": "Still have questions?"},
+		bearerAuth(token))
+	if w.Code != http.StatusOK {
+		t.Fatalf("submit-dialog: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp["status"] != "awaiting_human" {
+		t.Errorf("expected awaiting_human when questions submitted despite final response, got %v", resp["status"])
 	}
 }
 

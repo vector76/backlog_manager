@@ -34,30 +34,53 @@
 
 {{if .Projects}}
 {{range .Projects}}
+{{$proj := .Name}}
 <div class="card project-card">
-  <details{{if .JustCreated}} open{{end}}>
-    <summary>
-      <span style="font-weight:600;font-size:1rem">{{.Name}}</span>
-      <span class="muted" style="font-size:0.85rem">{{.FeatureCount}} feature{{if ne .FeatureCount 1}}s{{end}}</span>
+  <div class="flex-row" style="margin-bottom:0.75rem">
+    <div>
+      <a href="/project/{{.Name}}" style="font-weight:600;font-size:1.1rem;text-decoration:none;color:inherit">{{.Name}}</a>
+      <span class="muted" style="font-size:0.85rem;margin-left:0.5rem">{{.FeatureCount}} feature{{if ne .FeatureCount 1}}s{{end}}</span>
       {{if .Connectivity}}
-        <span class="connectivity {{if hasPrefix .Connectivity "Connected"}}connected{{end}}">● {{.Connectivity}}</span>
+        <span class="connectivity {{if hasPrefix .Connectivity "Connected"}}connected{{end}}" style="margin-left:0.5rem">● {{.Connectivity}}</span>
       {{else}}
-        <span class="connectivity muted">○ Never connected</span>
+        <span class="connectivity muted" style="margin-left:0.5rem">○ Never connected</span>
       {{end}}
-    </summary>
-    <div class="project-body">
-      {{if .StatCounts}}
-      <div class="stat-pills">
-        {{range .StatCounts}}
-        <span class="stat-pill">{{.Status}}: {{.Count}}</span>
-        {{end}}
-      </div>
-      {{end}}
-      <div class="mt1">
-        <a class="btn btn-secondary btn-sm" href="/project/{{.Name}}">View features</a>
-      </div>
     </div>
-  </details>
+    <span class="spacer"></span>
+    <a class="btn btn-secondary btn-sm" href="/project/{{.Name}}/new">+ New Feature</a>
+  </div>
+  {{if .Groups}}
+  {{range .Groups}}
+  <div class="status-group">
+    <div class="status-group-title">{{statusLabel .Status}} ({{len .Features}})</div>
+    <table class="feature-table">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Status</th>
+          <th>Updated</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .Features}}
+        <tr>
+          <td><a href="/project/{{$proj}}/feature/{{.ID}}">{{.Name}}</a></td>
+          <td>
+            <span class="badge {{statusBadgeClass .Status}}">{{statusLabel .Status}}</span>
+            {{if .BeadInfo}}<span class="muted" style="font-size:0.8rem;margin-left:0.4rem">{{.BeadInfo}}</span>{{end}}
+          </td>
+          <td class="muted" style="font-size:0.85rem;white-space:nowrap">{{.UpdatedAt}}</td>
+          <td><a class="btn btn-secondary btn-sm" href="/project/{{$proj}}/feature/{{.ID}}">View</a></td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+  {{end}}
+  {{else}}
+  <p class="muted">No features yet. <a href="/project/{{.Name}}/new">Create one</a>.</p>
+  {{end}}
 </div>
 {{end}}
 {{else}}
