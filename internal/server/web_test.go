@@ -191,37 +191,6 @@ func TestWebDashboardShowsNewProjectToken(t *testing.T) {
 	}
 }
 
-// TestWebProjectView checks that the project view page loads.
-func TestWebProjectView(t *testing.T) {
-	srv, st := newTestServer(t)
-	cookie := loginWeb(t, srv)
-
-	// Create project via store directly.
-	_, err := st.CreateProject("view-project", "test-token-abc")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	w := webRequest(t, srv, "GET", "/project/view-project", "", cookie)
-	if w.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", w.Code)
-	}
-	if !strings.Contains(w.Body.String(), "view-project") {
-		t.Errorf("expected project name in page")
-	}
-}
-
-// TestWebProjectViewNotFound checks that a missing project returns 404.
-func TestWebProjectViewNotFound(t *testing.T) {
-	srv, _ := newTestServer(t)
-	cookie := loginWeb(t, srv)
-
-	w := webRequest(t, srv, "GET", "/project/nonexistent", "", cookie)
-	if w.Code != http.StatusNotFound {
-		t.Errorf("expected 404, got %d", w.Code)
-	}
-}
-
 // TestWebNewFeaturePage checks that the new feature form loads.
 func TestWebNewFeaturePage(t *testing.T) {
 	srv, st := newTestServer(t)
@@ -259,14 +228,14 @@ func TestWebCreateFeature(t *testing.T) {
 	if w.Code != http.StatusFound {
 		t.Errorf("expected 302 redirect, got %d", w.Code)
 	}
-	if loc := w.Header().Get("Location"); loc != "/project/create-feat-project" {
-		t.Errorf("expected redirect to project page, got: %s", loc)
+	if loc := w.Header().Get("Location"); loc != "/" {
+		t.Errorf("expected redirect to dashboard, got: %s", loc)
 	}
 
-	// Verify feature appears in project view.
-	w2 := webRequest(t, srv, "GET", "/project/create-feat-project", "", cookie)
+	// Verify feature appears on dashboard.
+	w2 := webRequest(t, srv, "GET", "/", "", cookie)
 	if !strings.Contains(w2.Body.String(), "My New Feature") {
-		t.Errorf("expected feature name in project view")
+		t.Errorf("expected feature name in dashboard")
 	}
 }
 

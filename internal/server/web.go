@@ -280,7 +280,7 @@ func handleWebCreateProject(st Store) http.HandlerFunc {
 	}
 }
 
-// --- Project view handler ---
+// --- Feature handlers ---
 
 type featureRowData struct {
 	ID        string
@@ -293,64 +293,6 @@ type featureRowData struct {
 type featureGroupData struct {
 	Status   string
 	Features []featureRowData
-}
-
-type projectPageData struct {
-	basePageData
-	ProjectName string
-	Groups      []featureGroupData
-}
-
-func handleWebProject(st Store, monitor *BeadMonitor) http.HandlerFunc {
-	tmpl := mustParseTemplate("project")
-	return func(w http.ResponseWriter, r *http.Request) {
-		projectName := chi.URLParam(r, "name")
-		if _, err := st.GetProject(projectName); err != nil {
-			http.NotFound(w, r)
-			return
-		}
-		features, _ := st.ListFeatures(projectName, nil)
-
-		// Group features by status in the defined order.
-		byStatus := make(map[model.FeatureStatus][]featureRowData)
-		for _, f := range features {
-			row := featureRowData{
-				ID:        f.ID,
-				Name:      f.Name,
-				Status:    f.Status.String(),
-				UpdatedAt: f.UpdatedAt.Format("2006-01-02 15:04"),
-			}
-			if f.Status == model.StatusBeadsCreated && monitor != nil {
-				row.BeadInfo = beadInfoString(f.ID, monitor)
-			}
-			byStatus[f.Status] = append(byStatus[f.Status], row)
-		}
-
-		var groups []featureGroupData
-		for _, s := range statusOrder {
-			rows, ok := byStatus[s]
-			if !ok || len(rows) == 0 {
-				continue
-			}
-			// Sort within group: most recently updated first.
-			sort.Slice(rows, func(i, j int) bool {
-				return rows[i].UpdatedAt > rows[j].UpdatedAt
-			})
-			groups = append(groups, featureGroupData{
-				Status:   s.String(),
-				Features: rows,
-			})
-		}
-
-		tmpl.Execute(w, projectPageData{
-			basePageData: basePageData{Breadcrumbs: []breadcrumb{
-				{Label: "Dashboard", URL: "/"},
-				{Label: projectName},
-			}},
-			ProjectName: projectName,
-			Groups:      groups,
-		})
-	}
 }
 
 // beadInfoString returns a human-readable progress string for a feature's beads.
@@ -386,7 +328,7 @@ func handleWebNewFeature(st Store) http.HandlerFunc {
 		tmpl.Execute(w, newFeaturePageData{
 			basePageData: basePageData{Breadcrumbs: []breadcrumb{
 				{Label: "Dashboard", URL: "/"},
-				{Label: projectName, URL: "/project/" + projectName},
+				{Label: projectName},
 				{Label: "New Feature"},
 			}},
 			ProjectName: projectName,
@@ -399,7 +341,7 @@ func handleWebCreateFeature(st Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		projectName := chi.URLParam(r, "name")
 		if err := r.ParseForm(); err != nil {
-			http.Redirect(w, r, "/project/"+projectName, http.StatusFound)
+			http.Redirect(w, r, "/", http.StatusFound)
 			return
 		}
 		name := strings.TrimSpace(r.FormValue("name"))
@@ -409,10 +351,10 @@ func handleWebCreateFeature(st Store) http.HandlerFunc {
 			return
 		}
 		if _, err := st.CreateFeature(projectName, name, description); err != nil {
-			http.Redirect(w, r, "/project/"+projectName, http.StatusFound)
+			http.Redirect(w, r, "/", http.StatusFound)
 			return
 		}
-		http.Redirect(w, r, "/project/"+projectName, http.StatusFound)
+		http.Redirect(w, r, "/", http.StatusFound)
 	}
 }
 
@@ -520,7 +462,7 @@ func handleWebFeature(st Store, monitor *BeadMonitor) http.HandlerFunc {
 		tmpl.Execute(w, featureDetailPageData{
 			basePageData: basePageData{Breadcrumbs: []breadcrumb{
 				{Label: "Dashboard", URL: "/"},
-				{Label: projectName, URL: "/project/" + projectName},
+				{Label: projectName},
 				{Label: detail.Name},
 			}},
 			ProjectName: projectName,

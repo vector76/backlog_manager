@@ -120,7 +120,6 @@ func New(cfg *config.Config, st Store, monitors ...*BeadMonitor) *http.Server {
 		r.Use(webSessionMiddleware(sessions))
 		r.Get("/", handleWebDashboard(st, monitor))
 		r.Post("/projects", handleWebCreateProject(st))
-		r.Get("/project/{name}", handleWebProject(st, monitor))
 		r.Get("/project/{name}/new", handleWebNewFeature(st))
 		r.Post("/project/{name}/features", handleWebCreateFeature(st))
 		r.Get("/project/{name}/feature/{id}", handleWebFeature(st, monitor))
