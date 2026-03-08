@@ -46,9 +46,14 @@
       <label for="response" style="font-weight:600;display:block;margin-bottom:0.25rem">Your Response</label>
       <textarea name="response" id="response" rows="8" style="width:100%;box-sizing:border-box"></textarea>
     </div>
+    <div style="margin-bottom:0.75rem">
+      <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer">
+        <input type="checkbox" name="final" value="on">
+        Final answer — no further questions needed
+      </label>
+    </div>
     <div class="flex-row">
-      <button type="submit" name="final" value="false" class="btn">Send Response</button>
-      <button type="submit" name="final" value="true" class="btn btn-primary">Final Answer</button>
+      <button type="submit" class="btn btn-primary">Send Response</button>
     </div>
   </form>
 </div>

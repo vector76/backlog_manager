@@ -788,6 +788,7 @@ type pendingResponse struct {
 	FeatureDescription string `json:"feature_description"`
 	Questions          string `json:"questions"`
 	UserResponse       string `json:"user_response"`
+	IsFinal            bool   `json:"is_final"`
 }
 
 // handleGetPending handles GET /api/v1/features/{id}/pending.
@@ -863,6 +864,12 @@ func handleGetPending(st Store) http.HandlerFunc {
 			resp.FeatureDescription = desc
 			resp.Questions = questions
 			resp.UserResponse = response
+			for _, it := range feature.Iterations {
+				if it.Round == N {
+					resp.IsFinal = it.IsFinal
+					break
+				}
+			}
 		} else {
 			// Reopen: response_vN has the reopen message, description is from previous round.
 			prevDesc, err := st.ReadDescriptionVersion(project.Name, featureID, N-1)

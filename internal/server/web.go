@@ -564,7 +564,7 @@ func handleWebRespond(st Store) http.HandlerFunc {
 			return
 		}
 		response := r.FormValue("response")
-		final := r.FormValue("final") == "true"
+		final := r.FormValue("final") == "on"
 		_ = st.RespondToDialog(projectName, featureID, response, final)
 		http.Redirect(w, r, featurePage, http.StatusFound)
 	}
