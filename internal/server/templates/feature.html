@@ -92,9 +92,40 @@
 </div>
 {{end}}
 
-{{if or (eq .Feature.Status "waiting") (eq .Feature.Status "ready_to_generate") (eq .Feature.Status "generating") (eq .Feature.Status "beads_created")}}
+{{if or (eq .Feature.Status "waiting") (eq .Feature.Status "ready_to_generate") (eq .Feature.Status "generating")}}
 <div class="card">
   <div class="muted" style="margin-bottom:0.5rem">Status: <strong>{{statusLabel .Feature.Status}}</strong></div>
+  <button type="button" class="btn" disabled>Halt</button>
+</div>
+{{end}}
+
+{{if eq .Feature.Status "beads_created"}}
+<div class="card">
+  <div class="muted" style="margin-bottom:0.5rem">Status: <strong>{{statusLabel .Feature.Status}}</strong></div>
+  {{if .BeadProgress}}
+    {{if .BeadProgress.Unavailable}}
+    <div class="muted" style="margin-bottom:0.75rem">Bead status unavailable</div>
+    {{else}}
+    <div style="margin-bottom:0.75rem">
+      <strong>{{.BeadProgress.Closed}}/{{.BeadProgress.Total}} beads closed</strong>
+      <div style="background:var(--border);border-radius:4px;height:8px;margin-top:0.4rem;overflow:hidden">
+        {{if gt .BeadProgress.Total 0}}
+        <div style="background:var(--accent,#4caf50);height:100%;width:{{beadPercent .BeadProgress.Closed .BeadProgress.Total}}%"></div>
+        {{end}}
+      </div>
+    </div>
+    {{if .BeadProgress.Statuses}}
+    <details>
+      <summary style="cursor:pointer;font-size:0.9rem">Individual bead statuses</summary>
+      <ul style="margin-top:0.5rem;padding-left:1.25rem;font-size:0.9rem">
+        {{range $id, $status := .BeadProgress.Statuses}}
+        <li><code>{{$id}}</code>: {{$status}}</li>
+        {{end}}
+      </ul>
+    </details>
+    {{end}}
+    {{end}}
+  {{end}}
   <button type="button" class="btn" disabled>Halt</button>
 </div>
 {{end}}

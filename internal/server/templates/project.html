@@ -24,7 +24,10 @@
       {{range .Features}}
       <tr>
         <td><a href="/project/{{$.ProjectName}}/feature/{{.ID}}">{{.Name}}</a></td>
-        <td><span class="badge {{statusBadgeClass .Status}}">{{.Status}}</span></td>
+        <td>
+          <span class="badge {{statusBadgeClass .Status}}">{{statusLabel .Status}}</span>
+          {{if .BeadInfo}}<span class="muted" style="font-size:0.8rem;margin-left:0.4rem">{{.BeadInfo}}</span>{{end}}
+        </td>
         <td class="muted" style="font-size:0.85rem;white-space:nowrap">{{.UpdatedAt}}</td>
         <td><a class="btn btn-secondary btn-sm" href="/project/{{$.ProjectName}}/feature/{{.ID}}">View</a></td>
       </tr>

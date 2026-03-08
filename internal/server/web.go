@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"embed"
+	"fmt"
 	"html/template"
 	"net/http"
 	"sort"
@@ -19,6 +20,12 @@ var webFS embed.FS
 
 // templateFuncs provides helper functions available in all templates.
 var templateFuncs = template.FuncMap{
+	"beadPercent": func(closed, total int) int {
+		if total == 0 {
+			return 0
+		}
+		return closed * 100 / total
+	},
 	"renderMarkdown": func(md string) template.HTML {
 		var buf bytes.Buffer
 		if err := goldmark.Convert([]byte(md), &buf); err != nil {
@@ -263,6 +270,7 @@ type featureRowData struct {
 	Name      string
 	Status    string
 	UpdatedAt string
+	BeadInfo  string // e.g. "3/7 beads closed" for beads_created features; empty otherwise
 }
 
 type featureGroupData struct {
@@ -276,7 +284,7 @@ type projectPageData struct {
 	Groups      []featureGroupData
 }
 
-func handleWebProject(st Store) http.HandlerFunc {
+func handleWebProject(st Store, monitor *BeadMonitor) http.HandlerFunc {
 	tmpl := mustParseTemplate("project")
 	return func(w http.ResponseWriter, r *http.Request) {
 		projectName := chi.URLParam(r, "name")
@@ -289,12 +297,16 @@ func handleWebProject(st Store) http.HandlerFunc {
 		// Group features by status in the defined order.
 		byStatus := make(map[model.FeatureStatus][]featureRowData)
 		for _, f := range features {
-			byStatus[f.Status] = append(byStatus[f.Status], featureRowData{
+			row := featureRowData{
 				ID:        f.ID,
 				Name:      f.Name,
 				Status:    f.Status.String(),
 				UpdatedAt: f.UpdatedAt.Format("2006-01-02 15:04"),
-			})
+			}
+			if f.Status == model.StatusBeadsCreated && monitor != nil {
+				row.BeadInfo = beadInfoString(f.ID, monitor)
+			}
+			byStatus[f.Status] = append(byStatus[f.Status], row)
 		}
 
 		var groups []featureGroupData
@@ -322,6 +334,21 @@ func handleWebProject(st Store) http.HandlerFunc {
 			Groups:      groups,
 		})
 	}
+}
+
+// beadInfoString returns a human-readable progress string for a feature's beads.
+func beadInfoString(featureID string, monitor *BeadMonitor) string {
+	if monitor == nil {
+		return ""
+	}
+	p, ok := monitor.GetProgress(featureID)
+	if !ok {
+		return ""
+	}
+	if p.Unavailable {
+		return "Bead status unavailable"
+	}
+	return fmt.Sprintf("%d/%d beads closed", p.Closed, p.Total)
 }
 
 // --- New feature handler ---
@@ -393,9 +420,10 @@ type featureDetailPageData struct {
 	LatestQuestions    string
 	Iterations         []featureIterationPageData
 	OtherFeatures      []featureRowData
+	BeadProgress       *BeadProgress // non-nil for beads_created features when monitor is available
 }
 
-func handleWebFeature(st Store) http.HandlerFunc {
+func handleWebFeature(st Store, monitor *BeadMonitor) http.HandlerFunc {
 	tmpl := mustParseTemplate("feature")
 	return func(w http.ResponseWriter, r *http.Request) {
 		projectName := chi.URLParam(r, "name")
@@ -464,6 +492,14 @@ func handleWebFeature(st Store) http.HandlerFunc {
 			}
 		}
 
+		// Bead progress for features in beads_created status.
+		var beadProgress *BeadProgress
+		if detail.Status == model.StatusBeadsCreated && monitor != nil {
+			if p, ok := monitor.GetProgress(detail.ID); ok {
+				beadProgress = &p
+			}
+		}
+
 		tmpl.Execute(w, featureDetailPageData{
 			basePageData: basePageData{Breadcrumbs: []breadcrumb{
 				{Label: "Dashboard", URL: "/"},
@@ -482,6 +518,7 @@ func handleWebFeature(st Store) http.HandlerFunc {
 			LatestQuestions:    latestQuestions,
 			Iterations:         iterations,
 			OtherFeatures:      otherFeatures,
+			BeadProgress:       beadProgress,
 		})
 	}
 }

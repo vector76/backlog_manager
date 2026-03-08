@@ -5,12 +5,16 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/spf13/cobra"
 
+	"github.com/vector76/backlog_manager/internal/beadsserver"
 	"github.com/vector76/backlog_manager/internal/config"
 	"github.com/vector76/backlog_manager/internal/server"
 )
+
+const beadPollInterval = 60 * time.Second
 
 func newServeCmd() *cobra.Command {
 	var configPath string
@@ -29,7 +33,15 @@ func newServeCmd() *cobra.Command {
 				return fmt.Errorf("open store: %w", err)
 			}
 
-			srv := server.New(cfg, st)
+			var monitor *server.BeadMonitor
+			if cfg.BeadsServerURL != "" {
+				client := beadsserver.New(cfg.BeadsServerURL)
+				monitor = server.NewBeadMonitor(client, st, beadPollInterval)
+				monitor.Start()
+				log.Printf("bead monitor started, polling %s every %s", cfg.BeadsServerURL, beadPollInterval)
+			}
+
+			srv := server.New(cfg, st, monitor)
 			log.Printf("starting server on %s", srv.Addr)
 			if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
 				return err

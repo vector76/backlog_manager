@@ -13,6 +13,7 @@ type Config struct {
 	DataDir           string `json:"data_dir"`
 	DashboardUser     string `json:"dashboard_user"`
 	DashboardPassword string `json:"dashboard_password"`
+	BeadsServerURL    string `json:"beads_server_url"`
 }
 
 // Load reads and validates a config JSON file from the given path.

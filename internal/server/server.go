@@ -59,7 +59,13 @@ type contextKey string
 const projectContextKey contextKey = "project"
 
 // New creates a new HTTP server with the given config and store.
-func New(cfg *config.Config, st Store) *http.Server {
+// An optional BeadMonitor may be provided to enable bead status polling.
+func New(cfg *config.Config, st Store, monitors ...*BeadMonitor) *http.Server {
+	var monitor *BeadMonitor
+	if len(monitors) > 0 {
+		monitor = monitors[0]
+	}
+
 	r := chi.NewRouter()
 	r.Use(middleware.Recoverer)
 
@@ -112,10 +118,10 @@ func New(cfg *config.Config, st Store) *http.Server {
 		r.Use(webSessionMiddleware(sessions))
 		r.Get("/", handleWebDashboard(st))
 		r.Post("/projects", handleWebCreateProject(st))
-		r.Get("/project/{name}", handleWebProject(st))
+		r.Get("/project/{name}", handleWebProject(st, monitor))
 		r.Get("/project/{name}/new", handleWebNewFeature(st))
 		r.Post("/project/{name}/features", handleWebCreateFeature(st))
-		r.Get("/project/{name}/feature/{id}", handleWebFeature(st))
+		r.Get("/project/{name}/feature/{id}", handleWebFeature(st, monitor))
 		r.Post("/project/{name}/feature/{id}/description", handleWebUpdateDescription(st))
 		r.Post("/project/{name}/feature/{id}/start-dialog", handleWebStartDialog(st))
 		r.Post("/project/{name}/feature/{id}/respond", handleWebRespond(st))
