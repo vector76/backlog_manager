@@ -713,3 +713,217 @@ func TestGetOwnProject_ValidToken(t *testing.T) {
 		t.Error("expected feature_count in response")
 	}
 }
+
+// --- Dialog state machine endpoint tests ---
+
+// setupFeatureWithStatus creates a project and feature, then transitions the feature
+// to the desired status using the store directly.
+func setupFeatureWithStatus(t *testing.T, srv *http.Server, st *store.Store, status model.FeatureStatus) (projectName, featureID string) {
+	t.Helper()
+	auth := basicAuth("admin", "secret")
+	projectName = "dialogproj"
+
+	// Create project
+	w := doRequest(t, srv, "POST", "/api/v1/projects", map[string]any{"name": projectName}, auth)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create project: %d %s", w.Code, w.Body.String())
+	}
+
+	// Create feature
+	w = doRequest(t, srv, "POST", "/api/v1/projects/"+projectName+"/features",
+		map[string]any{"name": "feat1", "description": "desc"}, auth)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create feature: %d %s", w.Code, w.Body.String())
+	}
+	var feat map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&feat); err != nil {
+		t.Fatal(err)
+	}
+	featureID = feat["id"].(string)
+
+	// Transition through statuses to reach the desired state
+	transitions := []model.FeatureStatus{}
+	switch status {
+	case model.StatusDraft:
+		// no transitions needed
+	case model.StatusAwaitingClient:
+		transitions = []model.FeatureStatus{model.StatusAwaitingClient}
+	case model.StatusAwaitingHuman:
+		transitions = []model.FeatureStatus{model.StatusAwaitingClient, model.StatusAwaitingHuman}
+	case model.StatusFullySpecified:
+		transitions = []model.FeatureStatus{model.StatusAwaitingClient, model.StatusFullySpecified}
+	}
+
+	for _, s := range transitions {
+		if err := st.TransitionStatus(projectName, featureID, s); err != nil {
+			t.Fatalf("transition to %v: %v", s, err)
+		}
+	}
+
+	// For awaiting_human, set CurrentIteration=1 so RespondToDialog has a round to respond to.
+	// WriteClientRound doesn't check status, so it can be called in any state.
+	if status == model.StatusAwaitingHuman {
+		if err := st.WriteClientRound(projectName, featureID, 1, "desc v1", "questions"); err != nil {
+			t.Fatalf("write client round: %v", err)
+		}
+	}
+
+	return projectName, featureID
+}
+
+func TestHandleStartDialog(t *testing.T) {
+	srv, st := newTestServer(t)
+	auth := basicAuth("admin", "secret")
+
+	projectName, featureID := setupFeatureWithStatus(t, srv, st, model.StatusDraft)
+	path := "/api/v1/projects/" + projectName + "/features/" + featureID + "/start-dialog"
+
+	w := doRequest(t, srv, "POST", path, nil, auth)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp["status"] != "awaiting_client" {
+		t.Errorf("expected status awaiting_client, got %v", resp["status"])
+	}
+}
+
+func TestHandleStartDialog_WrongStatus(t *testing.T) {
+	srv, st := newTestServer(t)
+	auth := basicAuth("admin", "secret")
+
+	projectName, featureID := setupFeatureWithStatus(t, srv, st, model.StatusAwaitingClient)
+	path := "/api/v1/projects/" + projectName + "/features/" + featureID + "/start-dialog"
+
+	w := doRequest(t, srv, "POST", path, nil, auth)
+	if w.Code != http.StatusConflict {
+		t.Errorf("expected 409, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestHandleStartDialog_NoAuth(t *testing.T) {
+	srv, st := newTestServer(t)
+	projectName, featureID := setupFeatureWithStatus(t, srv, st, model.StatusDraft)
+	path := "/api/v1/projects/" + projectName + "/features/" + featureID + "/start-dialog"
+	w := doRequest(t, srv, "POST", path, nil, nil)
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401, got %d", w.Code)
+	}
+}
+
+func TestHandleRespondToDialog(t *testing.T) {
+	srv, st := newTestServer(t)
+	auth := basicAuth("admin", "secret")
+
+	projectName, featureID := setupFeatureWithStatus(t, srv, st, model.StatusAwaitingHuman)
+	path := "/api/v1/projects/" + projectName + "/features/" + featureID + "/respond"
+
+	w := doRequest(t, srv, "POST", path, map[string]any{"response": "my answer", "final": false}, auth)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp["status"] != "awaiting_client" {
+		t.Errorf("expected status awaiting_client, got %v", resp["status"])
+	}
+}
+
+func TestHandleRespondToDialog_Final(t *testing.T) {
+	srv, st := newTestServer(t)
+	auth := basicAuth("admin", "secret")
+
+	projectName, featureID := setupFeatureWithStatus(t, srv, st, model.StatusAwaitingHuman)
+	path := "/api/v1/projects/" + projectName + "/features/" + featureID + "/respond"
+
+	w := doRequest(t, srv, "POST", path, map[string]any{"response": "final answer", "final": true}, auth)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	// Verify is_final was set on the correct iteration (round 1, since setupFeatureWithStatus uses WriteClientRound(1,...))
+	f, err := st.GetFeature(projectName, featureID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, it := range f.Iterations {
+		if it.Round == 1 && it.IsFinal {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected is_final=true for round 1 after final respond; got Iterations=%v", f.Iterations)
+	}
+}
+
+func TestHandleRespondToDialog_WrongStatus(t *testing.T) {
+	srv, st := newTestServer(t)
+	auth := basicAuth("admin", "secret")
+
+	projectName, featureID := setupFeatureWithStatus(t, srv, st, model.StatusAwaitingClient)
+	path := "/api/v1/projects/" + projectName + "/features/" + featureID + "/respond"
+
+	w := doRequest(t, srv, "POST", path, map[string]any{"response": "answer", "final": false}, auth)
+	if w.Code != http.StatusConflict {
+		t.Errorf("expected 409, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestHandleRespondToDialog_NotFound(t *testing.T) {
+	srv, _ := newTestServer(t)
+	auth := basicAuth("admin", "secret")
+
+	w := doRequest(t, srv, "POST", "/api/v1/projects/noproject/features/nofeat/respond",
+		map[string]any{"response": "ans", "final": false}, auth)
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected 404, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestHandleReopenDialog(t *testing.T) {
+	srv, st := newTestServer(t)
+	auth := basicAuth("admin", "secret")
+
+	projectName, featureID := setupFeatureWithStatus(t, srv, st, model.StatusFullySpecified)
+	path := "/api/v1/projects/" + projectName + "/features/" + featureID + "/reopen"
+
+	w := doRequest(t, srv, "POST", path, map[string]any{"message": "please add feature X"}, auth)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp["status"] != "awaiting_client" {
+		t.Errorf("expected status awaiting_client, got %v", resp["status"])
+	}
+}
+
+func TestHandleReopenDialog_WrongStatus(t *testing.T) {
+	srv, st := newTestServer(t)
+	auth := basicAuth("admin", "secret")
+
+	projectName, featureID := setupFeatureWithStatus(t, srv, st, model.StatusAwaitingClient)
+	path := "/api/v1/projects/" + projectName + "/features/" + featureID + "/reopen"
+
+	w := doRequest(t, srv, "POST", path, map[string]any{"message": "message"}, auth)
+	if w.Code != http.StatusConflict {
+		t.Errorf("expected 409, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestHandleReopenDialog_NoAuth(t *testing.T) {
+	srv, st := newTestServer(t)
+	projectName, featureID := setupFeatureWithStatus(t, srv, st, model.StatusFullySpecified)
+	path := "/api/v1/projects/" + projectName + "/features/" + featureID + "/reopen"
+	w := doRequest(t, srv, "POST", path, map[string]any{"message": "msg"}, nil)
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401, got %d", w.Code)
+	}
+}

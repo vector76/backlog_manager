@@ -610,6 +610,133 @@ func (s *Store) ReadArtifact(projectName, featureID, name string) (string, error
 	return readFileOptional(s.artifactPath(projectName, featureID, name))
 }
 
+// --- Dialog state transitions ---
+
+// StartDialog transitions a feature from draft to awaiting_client.
+// No files are written; this is a pure status change.
+func (s *Store) StartDialog(projectName, featureID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	idx, err := s.findFeatureIndexLocked(projectName, featureID)
+	if err != nil {
+		return err
+	}
+
+	current := s.features[projectName][idx].Status
+	if current != model.StatusDraft {
+		return fmt.Errorf("invalid transition: start-dialog requires draft status, feature is in %v", current)
+	}
+
+	oldUpdatedAt := s.features[projectName][idx].UpdatedAt
+	s.features[projectName][idx].Status = model.StatusAwaitingClient
+	s.features[projectName][idx].UpdatedAt = time.Now().UTC()
+	if err := s.saveFeatures(projectName); err != nil {
+		s.features[projectName][idx].Status = current
+		s.features[projectName][idx].UpdatedAt = oldUpdatedAt
+		return err
+	}
+	return nil
+}
+
+// RespondToDialog stores the user response as response_vN.md (where N = current_iteration)
+// and transitions the feature from awaiting_human to awaiting_client.
+// If final is true, marks the iteration's is_final=true in the feature metadata.
+func (s *Store) RespondToDialog(projectName, featureID string, response string, final bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	idx, err := s.findFeatureIndexLocked(projectName, featureID)
+	if err != nil {
+		return err
+	}
+
+	current := s.features[projectName][idx].Status
+	if current != model.StatusAwaitingHuman {
+		return fmt.Errorf("invalid transition: respond requires awaiting_human status, feature is in %v", current)
+	}
+
+	round := s.features[projectName][idx].CurrentIteration
+	if round < 1 {
+		return fmt.Errorf("invalid transition: respond requires an active iteration (current_iteration must be >= 1, got %d)", round)
+	}
+	if err := os.WriteFile(s.responsePath(projectName, featureID, round), []byte(response), 0644); err != nil {
+		return fmt.Errorf("write response_v%d.md: %w", round, err)
+	}
+
+	oldUpdatedAt := s.features[projectName][idx].UpdatedAt
+	// Deep-copy so the rollback is not corrupted if we mutate the backing array below.
+	src := s.features[projectName][idx].Iterations
+	oldIterations := make([]model.DialogIteration, len(src))
+	copy(oldIterations, src)
+
+	s.features[projectName][idx].Status = model.StatusAwaitingClient
+	s.features[projectName][idx].UpdatedAt = time.Now().UTC()
+
+	if final {
+		iters := s.features[projectName][idx].Iterations
+		found := false
+		for i, it := range iters {
+			if it.Round == round {
+				iters[i].IsFinal = true
+				found = true
+				break
+			}
+		}
+		if !found {
+			iters = append(iters, model.DialogIteration{
+				Round:     round,
+				IsFinal:   true,
+				CreatedAt: time.Now().UTC(),
+			})
+		}
+		s.features[projectName][idx].Iterations = iters
+	}
+
+	if err := s.saveFeatures(projectName); err != nil {
+		s.features[projectName][idx].Status = current
+		s.features[projectName][idx].UpdatedAt = oldUpdatedAt
+		s.features[projectName][idx].Iterations = oldIterations
+		return err
+	}
+	return nil
+}
+
+// ReopenDialog stores the user message as response_vN.md for a new iteration (N = current_iteration+1),
+// increments CurrentIteration, and transitions the feature from fully_specified to awaiting_client.
+func (s *Store) ReopenDialog(projectName, featureID string, message string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	idx, err := s.findFeatureIndexLocked(projectName, featureID)
+	if err != nil {
+		return err
+	}
+
+	current := s.features[projectName][idx].Status
+	if current != model.StatusFullySpecified {
+		return fmt.Errorf("invalid transition: reopen requires fully_specified status, feature is in %v", current)
+	}
+
+	oldIteration := s.features[projectName][idx].CurrentIteration
+	newRound := oldIteration + 1
+	if err := os.WriteFile(s.responsePath(projectName, featureID, newRound), []byte(message), 0644); err != nil {
+		return fmt.Errorf("write response_v%d.md: %w", newRound, err)
+	}
+
+	oldUpdatedAt := s.features[projectName][idx].UpdatedAt
+	s.features[projectName][idx].Status = model.StatusAwaitingClient
+	s.features[projectName][idx].CurrentIteration = newRound
+	s.features[projectName][idx].UpdatedAt = time.Now().UTC()
+	if err := s.saveFeatures(projectName); err != nil {
+		s.features[projectName][idx].Status = current
+		s.features[projectName][idx].CurrentIteration = oldIteration
+		s.features[projectName][idx].UpdatedAt = oldUpdatedAt
+		return err
+	}
+	return nil
+}
+
 // --- Status transitions ---
 
 // TransitionStatus changes a feature's status, validating the transition.
@@ -692,6 +819,20 @@ func (s *Store) getFeatureLocked(projectName, featureID string) (*model.Feature,
 		}
 	}
 	return nil, fmt.Errorf("feature %q not found in project %q", featureID, projectName)
+}
+
+// findFeatureIndexLocked returns the slice index of a feature (for in-place mutation).
+// Must be called with mu held.
+func (s *Store) findFeatureIndexLocked(projectName, featureID string) (int, error) {
+	if _, ok := s.features[projectName]; !ok {
+		return -1, fmt.Errorf("project %q not found", projectName)
+	}
+	for i, f := range s.features[projectName] {
+		if f.ID == featureID {
+			return i, nil
+		}
+	}
+	return -1, fmt.Errorf("feature %q not found in project %q", featureID, projectName)
 }
 
 // --- File helpers ---

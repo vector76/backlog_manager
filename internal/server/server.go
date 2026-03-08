@@ -35,6 +35,9 @@ type Store interface {
 	GetFeatureDetail(projectName, featureID string) (*model.FeatureDetail, error)
 	UpdateFeature(updated *model.Feature) error
 	UpdateDescriptionV0(projectName, featureID, description string) error
+	StartDialog(projectName, featureID string) error
+	RespondToDialog(projectName, featureID string, response string, final bool) error
+	ReopenDialog(projectName, featureID string, message string) error
 }
 
 type contextKey string
@@ -61,6 +64,9 @@ func New(cfg *config.Config, st Store) *http.Server {
 		r.Get("/api/v1/projects/{name}/features/{id}", handleGetProjectFeature(st))
 		r.Patch("/api/v1/projects/{name}/features/{id}", handleUpdateFeature(st))
 		r.Delete("/api/v1/projects/{name}/features/{id}", handleAbandonFeature(st))
+		r.Post("/api/v1/projects/{name}/features/{id}/start-dialog", handleStartDialog(st))
+		r.Post("/api/v1/projects/{name}/features/{id}/respond", handleRespondToDialog(st))
+		r.Post("/api/v1/projects/{name}/features/{id}/reopen", handleReopenDialog(st))
 	})
 
 	// Token auth routes
@@ -533,6 +539,96 @@ func handleGetClientFeature(st Store) http.HandlerFunc {
 			return
 		}
 		writeJSON(w, http.StatusOK, toFeatureDetailResponse(detail))
+	}
+}
+
+// --- Dialog state machine handlers ---
+
+func handleStartDialog(st Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		projectName := chi.URLParam(r, "name")
+		featureID := chi.URLParam(r, "id")
+		if err := st.StartDialog(projectName, featureID); err != nil {
+			if strings.Contains(err.Error(), "not found") {
+				writeError(w, http.StatusNotFound, err.Error())
+			} else if strings.Contains(err.Error(), "invalid transition") {
+				writeError(w, http.StatusConflict, err.Error())
+			} else {
+				writeError(w, http.StatusInternalServerError, "internal error")
+			}
+			return
+		}
+		f, err := st.GetFeature(projectName, featureID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "internal error")
+			return
+		}
+		writeJSON(w, http.StatusOK, toFeatureResponse(*f))
+	}
+}
+
+type respondRequest struct {
+	Response string `json:"response"`
+	Final    bool   `json:"final"`
+}
+
+func handleRespondToDialog(st Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		projectName := chi.URLParam(r, "name")
+		featureID := chi.URLParam(r, "id")
+		var req respondRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+		if err := st.RespondToDialog(projectName, featureID, req.Response, req.Final); err != nil {
+			if strings.Contains(err.Error(), "not found") {
+				writeError(w, http.StatusNotFound, err.Error())
+			} else if strings.Contains(err.Error(), "invalid transition") {
+				writeError(w, http.StatusConflict, err.Error())
+			} else {
+				writeError(w, http.StatusInternalServerError, "internal error")
+			}
+			return
+		}
+		f, err := st.GetFeature(projectName, featureID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "internal error")
+			return
+		}
+		writeJSON(w, http.StatusOK, toFeatureResponse(*f))
+	}
+}
+
+type reopenRequest struct {
+	Message string `json:"message"`
+}
+
+func handleReopenDialog(st Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		projectName := chi.URLParam(r, "name")
+		featureID := chi.URLParam(r, "id")
+		var req reopenRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+		if err := st.ReopenDialog(projectName, featureID, req.Message); err != nil {
+			if strings.Contains(err.Error(), "not found") {
+				writeError(w, http.StatusNotFound, err.Error())
+			} else if strings.Contains(err.Error(), "invalid transition") {
+				writeError(w, http.StatusConflict, err.Error())
+			} else {
+				writeError(w, http.StatusInternalServerError, "internal error")
+			}
+			return
+		}
+		f, err := st.GetFeature(projectName, featureID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "internal error")
+			return
+		}
+		writeJSON(w, http.StatusOK, toFeatureResponse(*f))
 	}
 }
 

@@ -875,3 +875,310 @@ func TestConcurrentReadWrite(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+// --- Dialog state machine ---
+
+func setupDialogFeature(t *testing.T, status model.FeatureStatus) (*Store, *model.Feature) {
+	t.Helper()
+	s := newTestStore(t)
+	if _, err := s.CreateProject("p", "tok"); err != nil {
+		t.Fatal(err)
+	}
+	f, err := s.CreateFeature("p", "feat", "desc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status != model.StatusDraft {
+		s.mu.Lock()
+		for i, feat := range s.features["p"] {
+			if feat.ID == f.ID {
+				s.features["p"][i].Status = status
+			}
+		}
+		s.mu.Unlock()
+		if err := s.saveFeatures("p"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	updated, err := s.GetFeature("p", f.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s, updated
+}
+
+func TestStartDialog(t *testing.T) {
+	s, f := setupDialogFeature(t, model.StatusDraft)
+	if err := s.StartDialog("p", f.ID); err != nil {
+		t.Fatalf("StartDialog: %v", err)
+	}
+	got, err := s.GetFeature("p", f.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != model.StatusAwaitingClient {
+		t.Errorf("expected awaiting_client, got %v", got.Status)
+	}
+}
+
+func TestStartDialogWrongStatus(t *testing.T) {
+	s, f := setupDialogFeature(t, model.StatusAwaitingClient)
+	if err := s.StartDialog("p", f.ID); err == nil {
+		t.Error("expected error when not in draft status")
+	}
+}
+
+func TestStartDialogNotFound(t *testing.T) {
+	s := newTestStore(t)
+	if _, err := s.CreateProject("p", "tok"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.StartDialog("p", "no-such-id"); err == nil {
+		t.Error("expected error for missing feature")
+	}
+}
+
+func TestRespondToDialog(t *testing.T) {
+	s, f := setupDialogFeature(t, model.StatusAwaitingHuman)
+	// Set CurrentIteration to 1 so there's a round to respond to
+	s.mu.Lock()
+	for i, feat := range s.features["p"] {
+		if feat.ID == f.ID {
+			s.features["p"][i].CurrentIteration = 1
+		}
+	}
+	s.mu.Unlock()
+	if err := s.saveFeatures("p"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.RespondToDialog("p", f.ID, "my response", false); err != nil {
+		t.Fatalf("RespondToDialog: %v", err)
+	}
+	got, err := s.GetFeature("p", f.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != model.StatusAwaitingClient {
+		t.Errorf("expected awaiting_client, got %v", got.Status)
+	}
+	// Verify file was written
+	content, err := s.ReadResponse("p", f.ID, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if content != "my response" {
+		t.Errorf("response file: got %q, want %q", content, "my response")
+	}
+}
+
+func TestRespondToDialogFinal(t *testing.T) {
+	s, f := setupDialogFeature(t, model.StatusAwaitingHuman)
+	s.mu.Lock()
+	for i, feat := range s.features["p"] {
+		if feat.ID == f.ID {
+			s.features["p"][i].CurrentIteration = 2
+		}
+	}
+	s.mu.Unlock()
+	if err := s.saveFeatures("p"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.RespondToDialog("p", f.ID, "final answer", true); err != nil {
+		t.Fatalf("RespondToDialog final: %v", err)
+	}
+	got, err := s.GetFeature("p", f.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != model.StatusAwaitingClient {
+		t.Errorf("expected awaiting_client, got %v", got.Status)
+	}
+	// Verify is_final is set
+	found := false
+	for _, it := range got.Iterations {
+		if it.Round == 2 && it.IsFinal {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected is_final=true for round 2 in Iterations: %v", got.Iterations)
+	}
+}
+
+func TestRespondToDialogFinalIdempotent(t *testing.T) {
+	// Exercises the found=true branch: responding final=true when a DialogIteration
+	// entry for this round already exists (e.g. the feature was reset to awaiting_human
+	// via direct TransitionStatus after a previous final response).
+	s, f := setupDialogFeature(t, model.StatusAwaitingHuman)
+	s.mu.Lock()
+	for i, feat := range s.features["p"] {
+		if feat.ID == f.ID {
+			s.features["p"][i].CurrentIteration = 1
+		}
+	}
+	s.mu.Unlock()
+	if err := s.saveFeatures("p"); err != nil {
+		t.Fatal(err)
+	}
+
+	// First final response — adds a new DialogIteration entry.
+	if err := s.RespondToDialog("p", f.ID, "first final", true); err != nil {
+		t.Fatalf("first RespondToDialog: %v", err)
+	}
+
+	// Reset to awaiting_human with the same CurrentIteration so we can call again.
+	s.mu.Lock()
+	for i, feat := range s.features["p"] {
+		if feat.ID == f.ID {
+			s.features["p"][i].Status = model.StatusAwaitingHuman
+		}
+	}
+	s.mu.Unlock()
+	if err := s.saveFeatures("p"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Second final response — hits the found=true branch.
+	if err := s.RespondToDialog("p", f.ID, "second final", true); err != nil {
+		t.Fatalf("second RespondToDialog: %v", err)
+	}
+
+	got, err := s.GetFeature("p", f.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Should still have exactly one Iterations entry for round 1 with IsFinal=true.
+	count := 0
+	for _, it := range got.Iterations {
+		if it.Round == 1 {
+			count++
+			if !it.IsFinal {
+				t.Error("expected IsFinal=true on round 1 entry")
+			}
+		}
+	}
+	if count != 1 {
+		t.Errorf("expected exactly 1 DialogIteration for round 1, got %d: %v", count, got.Iterations)
+	}
+}
+
+func TestRespondToDialogWrongStatus(t *testing.T) {
+	s, f := setupDialogFeature(t, model.StatusAwaitingClient)
+	if err := s.RespondToDialog("p", f.ID, "response", false); err == nil {
+		t.Error("expected error when not in awaiting_human status")
+	}
+}
+
+func TestRespondToDialogZeroIteration(t *testing.T) {
+	// Feature in awaiting_human but CurrentIteration == 0 (no client round written yet)
+	s, f := setupDialogFeature(t, model.StatusAwaitingHuman)
+	// CurrentIteration defaults to 0 — should be rejected to avoid writing response_v0.md
+	if err := s.RespondToDialog("p", f.ID, "response", false); err == nil {
+		t.Error("expected error when current_iteration is 0")
+	}
+}
+
+func TestReopenDialog(t *testing.T) {
+	s, f := setupDialogFeature(t, model.StatusFullySpecified)
+	// Set CurrentIteration to 2
+	s.mu.Lock()
+	for i, feat := range s.features["p"] {
+		if feat.ID == f.ID {
+			s.features["p"][i].CurrentIteration = 2
+		}
+	}
+	s.mu.Unlock()
+	if err := s.saveFeatures("p"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.ReopenDialog("p", f.ID, "please add X"); err != nil {
+		t.Fatalf("ReopenDialog: %v", err)
+	}
+	got, err := s.GetFeature("p", f.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != model.StatusAwaitingClient {
+		t.Errorf("expected awaiting_client, got %v", got.Status)
+	}
+	if got.CurrentIteration != 3 {
+		t.Errorf("expected CurrentIteration=3, got %d", got.CurrentIteration)
+	}
+	// Verify response file was written for the new round
+	content, err := s.ReadResponse("p", f.ID, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if content != "please add X" {
+		t.Errorf("response file: got %q, want %q", content, "please add X")
+	}
+}
+
+func TestReopenDialogWrongStatus(t *testing.T) {
+	s, f := setupDialogFeature(t, model.StatusAwaitingHuman)
+	if err := s.ReopenDialog("p", f.ID, "message"); err == nil {
+		t.Error("expected error when not in fully_specified status")
+	}
+}
+
+func TestRespondToDialogFinalPersistence(t *testing.T) {
+	dir, err := os.MkdirTemp("", "bm-dialog-persist-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+
+	s1, err := New(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s1.CreateProject("p", "tok"); err != nil {
+		t.Fatal(err)
+	}
+	f, err := s1.CreateFeature("p", "feat", "desc")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Force to awaiting_human with iteration=1
+	s1.mu.Lock()
+	for i, feat := range s1.features["p"] {
+		if feat.ID == f.ID {
+			s1.features["p"][i].Status = model.StatusAwaitingHuman
+			s1.features["p"][i].CurrentIteration = 1
+		}
+	}
+	s1.mu.Unlock()
+	if err := s1.saveFeatures("p"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s1.RespondToDialog("p", f.ID, "final answer", true); err != nil {
+		t.Fatalf("RespondToDialog: %v", err)
+	}
+
+	// Reload from disk
+	s2, err := New(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := s2.GetFeature("p", f.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != model.StatusAwaitingClient {
+		t.Errorf("status after reload: got %v, want awaiting_client", got.Status)
+	}
+	found := false
+	for _, it := range got.Iterations {
+		if it.Round == 1 && it.IsFinal {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("is_final not persisted after reload: Iterations=%v", got.Iterations)
+	}
+}
