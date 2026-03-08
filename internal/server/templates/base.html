@@ -1,0 +1,36 @@
+{{define "base"}}<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{block "title" .}}Backlog Manager{{end}}</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/app.js"></script>
+</head>
+<body>
+<header>
+  <a class="brand" href="/">Backlog Manager</a>
+  <nav>
+    {{block "nav-extra" .}}{{end}}
+    <a href="/logout">Logout</a>
+    <button class="theme-btn" id="theme-toggle" title="Toggle theme">☾</button>
+  </nav>
+</header>
+{{if .Breadcrumbs}}
+<div class="breadcrumb">
+  {{range $i, $crumb := .Breadcrumbs}}
+    {{if $i}} &rsaquo; {{end}}
+    {{if $crumb.URL}}<a href="{{$crumb.URL}}">{{$crumb.Label}}</a>{{else}}<span>{{$crumb.Label}}</span>{{end}}
+  {{end}}
+</div>
+{{end}}
+<main>
+{{block "content" .}}{{end}}
+</main>
+<script>
+// Re-apply theme (in case script loaded before DOMContentLoaded)
+(function(){var t=localStorage.getItem('bm-theme')||'light';document.documentElement.setAttribute('data-theme',t);})();
+</script>
+</body>
+</html>
+{{end}}

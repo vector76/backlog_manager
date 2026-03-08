@@ -1,0 +1,45 @@
+{{template "base" .}}
+{{define "title"}}{{.Feature.Name}} - {{.ProjectName}} - Backlog Manager{{end}}
+{{define "content"}}
+<div class="flex-row" style="margin-bottom:1rem">
+  <div>
+    <h1 style="margin-bottom:0.25rem">{{.Feature.Name}}</h1>
+    <span class="badge {{statusBadgeClass .Feature.Status}}">{{.Feature.Status}}</span>
+    <span class="muted" style="font-size:0.85rem;margin-left:0.5rem">updated {{.Feature.UpdatedAt}}</span>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Initial Description</h2>
+  <div class="md-content">{{renderMarkdown .InitialDescription}}</div>
+</div>
+
+{{if .Iterations}}
+{{range .Iterations}}
+<div class="card">
+  <div style="font-size:0.85rem;font-weight:600;color:var(--muted);margin-bottom:0.75rem">Round {{.Round}}</div>
+
+  {{if .Description}}
+  <div class="iteration-block">
+    <div class="iteration-label">Revised Description</div>
+    <div class="md-content">{{renderMarkdown .Description}}</div>
+  </div>
+  {{end}}
+
+  {{if .Questions}}
+  <div class="iteration-block">
+    <div class="iteration-label">Client Questions</div>
+    <div class="md-content">{{renderMarkdown .Questions}}</div>
+  </div>
+  {{end}}
+
+  {{if .Response}}
+  <div class="iteration-block">
+    <div class="iteration-label">Human Response</div>
+    <div class="md-content">{{renderMarkdown .Response}}</div>
+  </div>
+  {{end}}
+</div>
+{{end}}
+{{end}}
+{{end}}

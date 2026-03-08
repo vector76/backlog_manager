@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -89,6 +90,24 @@ func New(cfg *config.Config, st Store) *http.Server {
 		r.Get("/api/v1/poll", handlePoll(st))
 		r.Get("/api/v1/features/{id}/pending", handleGetPending(st))
 		r.Post("/api/v1/features/{id}/submit-dialog", handleSubmitDialog(st))
+	})
+
+	// Web dashboard routes
+	sessions := newSessionStore()
+	staticFS, _ := fs.Sub(webFS, "static")
+	r.Handle("/static/*", http.StripPrefix("/static", http.FileServer(http.FS(staticFS))))
+	loginHandler := handleWebLogin(sessions, cfg.DashboardUser, cfg.DashboardPassword)
+	r.Get("/login", loginHandler)
+	r.Post("/login", loginHandler)
+	r.Get("/logout", handleWebLogout(sessions))
+	r.Group(func(r chi.Router) {
+		r.Use(webSessionMiddleware(sessions))
+		r.Get("/", handleWebDashboard(st))
+		r.Post("/projects", handleWebCreateProject(st))
+		r.Get("/project/{name}", handleWebProject(st))
+		r.Get("/project/{name}/new", handleWebNewFeature(st))
+		r.Post("/project/{name}/features", handleWebCreateFeature(st))
+		r.Get("/project/{name}/feature/{id}", handleWebFeature(st))
 	})
 
 	return &http.Server{

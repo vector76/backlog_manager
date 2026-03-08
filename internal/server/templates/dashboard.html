@@ -1,0 +1,67 @@
+{{template "base" .}}
+{{define "title"}}Dashboard - Backlog Manager{{end}}
+{{define "content"}}
+<div class="flex-row" style="margin-bottom:1rem">
+  <h1 style="margin-bottom:0">Projects</h1>
+  <span class="spacer"></span>
+  <button class="btn btn-primary btn-sm" id="add-project-btn">+ New Project</button>
+</div>
+
+<div class="card add-project-form" id="add-project-form">
+  <h2>Create Project</h2>
+  <form method="POST" action="/projects">
+    <div class="inline-form">
+      <div class="form-group">
+        <label for="name">Project name</label>
+        <input type="text" id="name" name="name" placeholder="my-project" pattern="[a-zA-Z0-9][a-zA-Z0-9_\-]*" required>
+      </div>
+      <button type="submit" class="btn btn-primary">Create</button>
+    </div>
+  </form>
+</div>
+
+{{if .NewProject}}
+<div class="alert alert-success">
+  <strong>Project "{{.NewProject.Name}}" created!</strong><br>
+  Save this token — it will not be shown again:<br>
+  <div style="margin-top:0.5rem;display:flex;gap:0.5rem;align-items:center">
+    <span class="token-box" id="new-token-value">{{.NewProject.Token}}</span>
+    <button class="btn btn-sm btn-secondary" id="copy-token-btn">Copy</button>
+  </div>
+</div>
+{{end}}
+
+{{if .Projects}}
+{{range .Projects}}
+<div class="card project-card">
+  <details{{if .JustCreated}} open{{end}}>
+    <summary>
+      <span style="font-weight:600;font-size:1rem">{{.Name}}</span>
+      <span class="muted" style="font-size:0.85rem">{{.FeatureCount}} feature{{if ne .FeatureCount 1}}s{{end}}</span>
+      {{if .Connectivity}}
+        <span class="connectivity {{if eq .Connectivity "Connected"}}connected{{end}}">● {{.Connectivity}}</span>
+      {{else}}
+        <span class="connectivity muted">○ Never connected</span>
+      {{end}}
+    </summary>
+    <div class="project-body">
+      {{if .StatCounts}}
+      <div class="stat-pills">
+        {{range .StatCounts}}
+        <span class="stat-pill">{{.Status}}: {{.Count}}</span>
+        {{end}}
+      </div>
+      {{end}}
+      <div class="mt1">
+        <a class="btn btn-secondary btn-sm" href="/project/{{.Name}}">View features</a>
+      </div>
+    </div>
+  </details>
+</div>
+{{end}}
+{{else}}
+<div class="card">
+  <p class="muted">No projects yet. Create one to get started.</p>
+</div>
+{{end}}
+{{end}}

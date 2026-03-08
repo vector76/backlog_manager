@@ -1,0 +1,23 @@
+{{template "base" .}}
+{{define "title"}}Login - Backlog Manager{{end}}
+{{define "content"}}
+<div class="login-container">
+  <div class="login-title">Backlog Manager</div>
+  {{if .Error}}
+  <div class="alert alert-danger">{{.Error}}</div>
+  {{end}}
+  <div class="card">
+    <form method="POST" action="/login">
+      <div class="form-group">
+        <label for="username">Username</label>
+        <input type="text" id="username" name="username" autocomplete="username" required autofocus>
+      </div>
+      <div class="form-group">
+        <label for="password">Password</label>
+        <input type="password" id="password" name="password" autocomplete="current-password" required>
+      </div>
+      <button type="submit" class="btn btn-primary" style="width:100%">Sign in</button>
+    </form>
+  </div>
+</div>
+{{end}}
