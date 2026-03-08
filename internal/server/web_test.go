@@ -135,6 +135,26 @@ func TestWebDashboardWithProjects(t *testing.T) {
 	}
 }
 
+// TestWebDashboardProjectDataAttribute checks that projects have a data-project attribute for localStorage persistence.
+func TestWebDashboardProjectDataAttribute(t *testing.T) {
+	srv, st := newTestServer(t)
+	cookie := loginWeb(t, srv)
+
+	_, err := st.CreateProject("attr-test-project", "tok-attr")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	w := webRequest(t, srv, "GET", "/", "", cookie)
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Code)
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, `data-project="`) {
+		t.Errorf("expected data-project attribute in dashboard body")
+	}
+}
+
 // TestWebLogout checks that logout clears the session and redirects to /login.
 func TestWebLogout(t *testing.T) {
 	srv, _ := newTestServer(t)

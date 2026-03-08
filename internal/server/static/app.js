@@ -66,5 +66,37 @@
         });
       });
     }
+
+    // Project expand/collapse persistence
+    var PROJECT_STATE_KEY = "bm-project-state";
+
+    function loadProjectStates() {
+      try { return JSON.parse(localStorage.getItem(PROJECT_STATE_KEY)) || {}; } catch (e) { return {}; }
+    }
+
+    function saveProjectStates(states) {
+      localStorage.setItem(PROJECT_STATE_KEY, JSON.stringify(states));
+    }
+
+    var details = document.querySelectorAll("details[data-project]");
+    var states = loadProjectStates();
+    var changed = false;
+
+    details.forEach(function (el) {
+      var name = el.getAttribute("data-project");
+      if (Object.prototype.hasOwnProperty.call(states, name)) {
+        el.open = states[name];
+      } else {
+        el.open = true;
+        states[name] = true;
+        changed = true;
+      }
+      el.addEventListener("toggle", function () {
+        var s = loadProjectStates();
+        s[name] = el.open;
+        saveProjectStates(s);
+      });
+    });
+    if (changed) saveProjectStates(states);
   });
 })();

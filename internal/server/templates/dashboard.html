@@ -36,7 +36,7 @@
 {{range .Projects}}
 {{$proj := .Name}}
 <div class="card project-card">
-  <details {{if .JustCreated}}open{{end}}>
+  <details data-project="{{.Name}}" {{if .JustCreated}}open{{end}}>
     <summary>
       <span style="font-weight:600;font-size:1.1rem">{{.Name}}</span>
       <span class="muted" style="font-size:0.85rem;margin-left:0.5rem">{{.FeatureCount}} feature{{if ne .FeatureCount 1}}s{{end}}</span>
