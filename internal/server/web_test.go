@@ -135,6 +135,36 @@ func TestWebDashboardWithProjects(t *testing.T) {
 	}
 }
 
+// TestWebDashboardNoViewButton checks that the dashboard does not render a View button for features.
+func TestWebDashboardNoViewButton(t *testing.T) {
+	srv, st := newTestServer(t)
+	cookie := loginWeb(t, srv)
+
+	_, err := st.CreateProject("view-btn-project", "tok-view")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := st.CreateFeature("view-btn-project", "My Feature Name", "Description.")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	w := webRequest(t, srv, "GET", "/", "", cookie)
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Code)
+	}
+	body := w.Body.String()
+	if strings.Contains(body, ">View<") {
+		t.Errorf("expected no View button in dashboard, but found one")
+	}
+	if !strings.Contains(body, "/project/view-btn-project/feature/"+f.ID) {
+		t.Errorf("expected feature link in dashboard body")
+	}
+	if !strings.Contains(body, "My Feature Name") {
+		t.Errorf("expected feature name in dashboard body")
+	}
+}
+
 // TestWebDashboardProjectDataAttribute checks that projects have a data-project attribute for localStorage persistence.
 func TestWebDashboardProjectDataAttribute(t *testing.T) {
 	srv, st := newTestServer(t)
