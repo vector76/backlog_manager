@@ -11,5 +11,8 @@ func NewRootCmd() *cobra.Command {
 	root.AddCommand(newStatusCmd())
 	root.AddCommand(newFeaturesCmd())
 	root.AddCommand(newShowCmd())
+	root.AddCommand(newPollCmd())
+	root.AddCommand(newFetchCmd())
+	root.AddCommand(newSubmitCmd())
 	return root
 }

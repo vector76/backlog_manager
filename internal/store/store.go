@@ -65,6 +65,9 @@ type Store struct {
 	dataDir  string
 	projects []model.Project
 	features map[string][]model.Feature // project name -> features
+
+	pollMu   sync.RWMutex
+	lastPoll map[string]time.Time // project name -> last poll timestamp
 }
 
 // New creates or opens a Store rooted at dataDir, loading existing data from disk.
@@ -72,6 +75,7 @@ func New(dataDir string) (*Store, error) {
 	s := &Store{
 		dataDir:  dataDir,
 		features: make(map[string][]model.Feature),
+		lastPoll: make(map[string]time.Time),
 	}
 	if err := os.MkdirAll(dataDir, 0755); err != nil {
 		return nil, fmt.Errorf("create data dir: %w", err)
@@ -833,6 +837,79 @@ func (s *Store) findFeatureIndexLocked(projectName, featureID string) (int, erro
 		}
 	}
 	return -1, fmt.Errorf("feature %q not found in project %q", featureID, projectName)
+}
+
+// --- Client connectivity tracking ---
+
+// RecordPoll records the current time as the last poll timestamp for a project.
+func (s *Store) RecordPoll(projectName string) {
+	s.pollMu.Lock()
+	defer s.pollMu.Unlock()
+	s.lastPoll[projectName] = time.Now().UTC()
+}
+
+// GetLastPollTime returns the last poll time for a project and whether it has been polled.
+func (s *Store) GetLastPollTime(projectName string) (time.Time, bool) {
+	s.pollMu.RLock()
+	defer s.pollMu.RUnlock()
+	t, ok := s.lastPoll[projectName]
+	return t, ok
+}
+
+// --- Client dialog submission ---
+
+// SubmitClientDialog writes description_vN.md and questions_vN.md for a new dialog round
+// and transitions the feature status. If the previous user response was marked is_final=true
+// and questions is empty, transitions to fully_specified; otherwise to awaiting_human.
+func (s *Store) SubmitClientDialog(projectName, featureID, updatedDescription, questions string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	idx, err := s.findFeatureIndexLocked(projectName, featureID)
+	if err != nil {
+		return err
+	}
+
+	current := s.features[projectName][idx].Status
+	if current != model.StatusAwaitingClient {
+		return fmt.Errorf("invalid transition: submit-dialog requires awaiting_client status, feature is in %v", current)
+	}
+
+	oldIteration := s.features[projectName][idx].CurrentIteration
+	newRound := oldIteration + 1
+
+	if err := os.WriteFile(s.descriptionPath(projectName, featureID, newRound), []byte(updatedDescription), 0644); err != nil {
+		return fmt.Errorf("write description_v%d.md: %w", newRound, err)
+	}
+	if err := os.WriteFile(s.questionsPath(projectName, featureID, newRound), []byte(questions), 0644); err != nil {
+		return fmt.Errorf("write questions_v%d.md: %w", newRound, err)
+	}
+
+	// Check if the previous response (round == oldIteration) was marked final.
+	isFinalResponse := false
+	for _, it := range s.features[projectName][idx].Iterations {
+		if it.Round == oldIteration && it.IsFinal {
+			isFinalResponse = true
+			break
+		}
+	}
+
+	newStatus := model.StatusAwaitingHuman
+	if isFinalResponse && questions == "" {
+		newStatus = model.StatusFullySpecified
+	}
+
+	oldUpdatedAt := s.features[projectName][idx].UpdatedAt
+	s.features[projectName][idx].CurrentIteration = newRound
+	s.features[projectName][idx].Status = newStatus
+	s.features[projectName][idx].UpdatedAt = time.Now().UTC()
+	if err := s.saveFeatures(projectName); err != nil {
+		s.features[projectName][idx].CurrentIteration = oldIteration
+		s.features[projectName][idx].Status = current
+		s.features[projectName][idx].UpdatedAt = oldUpdatedAt
+		return err
+	}
+	return nil
 }
 
 // --- File helpers ---

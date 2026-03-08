@@ -927,3 +927,309 @@ func TestHandleReopenDialog_NoAuth(t *testing.T) {
 		t.Errorf("expected 401, got %d", w.Code)
 	}
 }
+
+// --- Client poll endpoint tests ---
+
+// getProjectToken creates a project via dashboard and returns its token.
+func getProjectToken(t *testing.T, srv *http.Server, projectName string) string {
+	t.Helper()
+	auth := basicAuth("admin", "secret")
+	w := doRequest(t, srv, "POST", "/api/v1/projects", map[string]any{"name": projectName}, auth)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create project: %d %s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	return resp["token"].(string)
+}
+
+// tokenForProject returns the bearer token for an existing project from the store.
+func tokenForProject(t *testing.T, st *store.Store, projectName string) string {
+	t.Helper()
+	p, err := st.GetProject(projectName)
+	if err != nil {
+		t.Fatalf("get project %q: %v", projectName, err)
+	}
+	return p.Token
+}
+
+func TestHandlePoll_NoWork_Returns204(t *testing.T) {
+	srv, _ := newTestServer(t)
+	token := getProjectToken(t, srv, "pollproj1")
+
+	w := doRequest(t, srv, "GET", "/api/v1/poll?timeout=1", nil, bearerAuth(token))
+	if w.Code != http.StatusNoContent {
+		t.Errorf("expected 204 when no work, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestHandlePoll_WithWork_Returns200(t *testing.T) {
+	srv, st := newTestServer(t)
+	auth := basicAuth("admin", "secret")
+
+	// Create project and get token.
+	w := doRequest(t, srv, "POST", "/api/v1/projects", map[string]any{"name": "pollproj2"}, auth)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create project: %d", w.Code)
+	}
+	var projResp map[string]any
+	json.NewDecoder(w.Body).Decode(&projResp)
+	token := projResp["token"].(string)
+
+	// Create feature and start dialog → awaiting_client.
+	w = doRequest(t, srv, "POST", "/api/v1/projects/pollproj2/features",
+		map[string]any{"name": "feat", "description": "desc"}, auth)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create feature: %d", w.Code)
+	}
+	var feat map[string]any
+	json.NewDecoder(w.Body).Decode(&feat)
+	featureID := feat["id"].(string)
+
+	if err := st.StartDialog("pollproj2", featureID); err != nil {
+		t.Fatal(err)
+	}
+
+	// Poll should return immediately with work.
+	w = doRequest(t, srv, "GET", "/api/v1/poll?timeout=1", nil, bearerAuth(token))
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 with work, got %d: %s", w.Code, w.Body.String())
+	}
+	var pollResp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&pollResp); err != nil {
+		t.Fatal(err)
+	}
+	if pollResp["action"] != "dialog_step" {
+		t.Errorf("expected action=dialog_step, got %v", pollResp["action"])
+	}
+	if pollResp["feature_id"] != featureID {
+		t.Errorf("expected feature_id=%s, got %v", featureID, pollResp["feature_id"])
+	}
+	if pollResp["feature_name"] != "feat" {
+		t.Errorf("expected feature_name=feat, got %v", pollResp["feature_name"])
+	}
+}
+
+func TestHandlePoll_NoAuth(t *testing.T) {
+	srv, _ := newTestServer(t)
+	w := doRequest(t, srv, "GET", "/api/v1/poll", nil, nil)
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401, got %d", w.Code)
+	}
+}
+
+func TestHandlePoll_RecordsConnectivity(t *testing.T) {
+	srv, _ := newTestServer(t)
+	token := getProjectToken(t, srv, "connproj")
+
+	// Before poll: no connectivity.
+	w := doRequest(t, srv, "GET", "/api/v1/project", nil, bearerAuth(token))
+	var proj map[string]any
+	json.NewDecoder(w.Body).Decode(&proj)
+	if proj["connectivity"] != nil && proj["connectivity"] != "" {
+		t.Errorf("expected no connectivity before poll, got %v", proj["connectivity"])
+	}
+
+	// Poll (timeout=1 to avoid blocking).
+	doRequest(t, srv, "GET", "/api/v1/poll?timeout=1", nil, bearerAuth(token))
+
+	// After poll: "Connected".
+	w = doRequest(t, srv, "GET", "/api/v1/project", nil, bearerAuth(token))
+	json.NewDecoder(w.Body).Decode(&proj)
+	if proj["connectivity"] != "Connected" {
+		t.Errorf("expected connectivity=Connected after poll, got %v", proj["connectivity"])
+	}
+}
+
+// --- Pending endpoint tests ---
+
+func TestHandleGetPending_FirstRound(t *testing.T) {
+	srv, st := newTestServer(t)
+	auth := basicAuth("admin", "secret")
+	projectName, featureID := setupFeatureWithStatus(t, srv, st, model.StatusDraft)
+	token := tokenForProject(t, st, projectName)
+
+	// Start dialog → awaiting_client, iteration=0.
+	w := doRequest(t, srv, "POST",
+		"/api/v1/projects/"+projectName+"/features/"+featureID+"/start-dialog",
+		nil, auth)
+	if w.Code != http.StatusOK {
+		t.Fatalf("start-dialog: %d", w.Code)
+	}
+
+	w = doRequest(t, srv, "GET",
+		"/api/v1/features/"+featureID+"/pending", nil, bearerAuth(token))
+	if w.Code != http.StatusOK {
+		t.Fatalf("pending: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	json.NewDecoder(w.Body).Decode(&resp)
+
+	if resp["iteration"] != float64(0) {
+		t.Errorf("expected iteration=0, got %v", resp["iteration"])
+	}
+	if resp["feature_description"] == "" {
+		t.Error("expected non-empty feature_description")
+	}
+	if resp["questions"] != "" && resp["questions"] != nil {
+		t.Errorf("expected empty questions, got %v", resp["questions"])
+	}
+	if resp["user_response"] != "" && resp["user_response"] != nil {
+		t.Errorf("expected empty user_response, got %v", resp["user_response"])
+	}
+}
+
+func TestHandleGetPending_SubsequentRound(t *testing.T) {
+	srv, st := newTestServer(t)
+	projectName, featureID := setupFeatureWithStatus(t, srv, st, model.StatusAwaitingHuman)
+	// setupFeatureWithStatus with AwaitingHuman calls WriteClientRound(1, "desc v1", "questions")
+	token := tokenForProject(t, st, projectName)
+
+	// Respond to make feature awaiting_client again.
+	if err := st.RespondToDialog(projectName, featureID, "my answer", false); err != nil {
+		t.Fatal(err)
+	}
+
+	w := doRequest(t, srv, "GET",
+		"/api/v1/features/"+featureID+"/pending", nil, bearerAuth(token))
+	if w.Code != http.StatusOK {
+		t.Fatalf("pending: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	json.NewDecoder(w.Body).Decode(&resp)
+
+	if resp["iteration"] != float64(1) {
+		t.Errorf("expected iteration=1, got %v", resp["iteration"])
+	}
+	if resp["feature_description"] == "" {
+		t.Error("expected non-empty feature_description")
+	}
+	if resp["questions"] == "" {
+		t.Error("expected non-empty questions")
+	}
+	if resp["user_response"] == "" {
+		t.Error("expected non-empty user_response")
+	}
+}
+
+func TestHandleGetPending_NotFound(t *testing.T) {
+	srv, _ := newTestServer(t)
+	token := getProjectToken(t, srv, "pendingproj")
+
+	w := doRequest(t, srv, "GET", "/api/v1/features/ft-notexist/pending", nil, bearerAuth(token))
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected 404, got %d", w.Code)
+	}
+}
+
+func TestHandleGetPending_WrongStatus(t *testing.T) {
+	srv, st := newTestServer(t)
+	projectName, featureID := setupFeatureWithStatus(t, srv, st, model.StatusDraft)
+	token := tokenForProject(t, st, projectName)
+
+	w := doRequest(t, srv, "GET",
+		"/api/v1/features/"+featureID+"/pending", nil, bearerAuth(token))
+	if w.Code != http.StatusConflict {
+		t.Errorf("expected 409 for non-actionable feature, got %d", w.Code)
+	}
+}
+
+func TestHandleGetPending_NoAuth(t *testing.T) {
+	srv, _ := newTestServer(t)
+	w := doRequest(t, srv, "GET", "/api/v1/features/ft-abc/pending", nil, nil)
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401, got %d", w.Code)
+	}
+}
+
+// --- Submit-dialog endpoint tests ---
+
+func TestHandleSubmitDialog_ToAwaitingHuman(t *testing.T) {
+	srv, st := newTestServer(t)
+	auth := basicAuth("admin", "secret")
+	projectName, featureID := setupFeatureWithStatus(t, srv, st, model.StatusDraft)
+	token := tokenForProject(t, st, projectName)
+
+	// Start dialog.
+	doRequest(t, srv, "POST",
+		"/api/v1/projects/"+projectName+"/features/"+featureID+"/start-dialog",
+		nil, auth)
+
+	// Submit with questions → should go to awaiting_human.
+	w := doRequest(t, srv, "POST",
+		"/api/v1/features/"+featureID+"/submit-dialog",
+		map[string]string{"updated_description": "new desc", "questions": "Any questions?"},
+		bearerAuth(token))
+	if w.Code != http.StatusOK {
+		t.Fatalf("submit-dialog: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp["status"] != "awaiting_human" {
+		t.Errorf("expected awaiting_human, got %v", resp["status"])
+	}
+}
+
+func TestHandleSubmitDialog_ToFullySpecified(t *testing.T) {
+	srv, st := newTestServer(t)
+	auth := basicAuth("admin", "secret")
+	projectName, featureID := setupFeatureWithStatus(t, srv, st, model.StatusAwaitingHuman)
+	token := tokenForProject(t, st, projectName)
+
+	// Respond with final=true → awaiting_client.
+	doRequest(t, srv, "POST",
+		"/api/v1/projects/"+projectName+"/features/"+featureID+"/respond",
+		map[string]any{"response": "final answer", "final": true}, auth)
+
+	// Submit with no questions + is_final → should go to fully_specified.
+	w := doRequest(t, srv, "POST",
+		"/api/v1/features/"+featureID+"/submit-dialog",
+		map[string]string{"updated_description": "final desc", "questions": ""},
+		bearerAuth(token))
+	if w.Code != http.StatusOK {
+		t.Fatalf("submit-dialog: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp["status"] != "fully_specified" {
+		t.Errorf("expected fully_specified, got %v", resp["status"])
+	}
+}
+
+func TestHandleSubmitDialog_WrongStatus(t *testing.T) {
+	srv, st := newTestServer(t)
+	projectName, featureID := setupFeatureWithStatus(t, srv, st, model.StatusDraft)
+	token := tokenForProject(t, st, projectName)
+
+	w := doRequest(t, srv, "POST",
+		"/api/v1/features/"+featureID+"/submit-dialog",
+		map[string]string{"updated_description": "desc", "questions": "q"},
+		bearerAuth(token))
+	if w.Code != http.StatusConflict {
+		t.Errorf("expected 409, got %d", w.Code)
+	}
+}
+
+func TestHandleSubmitDialog_NotFound(t *testing.T) {
+	srv, _ := newTestServer(t)
+	token := getProjectToken(t, srv, "submitproj")
+
+	w := doRequest(t, srv, "POST",
+		"/api/v1/features/ft-notexist/submit-dialog",
+		map[string]string{"updated_description": "desc", "questions": "q"},
+		bearerAuth(token))
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected 404, got %d", w.Code)
+	}
+}
+
+func TestHandleSubmitDialog_NoAuth(t *testing.T) {
+	srv, _ := newTestServer(t)
+	w := doRequest(t, srv, "POST", "/api/v1/features/ft-abc/submit-dialog",
+		map[string]string{"updated_description": "d", "questions": "q"}, nil)
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401, got %d", w.Code)
+	}
+}

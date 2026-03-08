@@ -9,7 +9,9 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -18,6 +20,9 @@ import (
 	"github.com/vector76/backlog_manager/internal/model"
 	"github.com/vector76/backlog_manager/internal/store"
 )
+
+// pollTimeout is the maximum duration a poll request will block.
+const pollTimeout = 30 * time.Second
 
 // Version is the server version string.
 const Version = "0.1.0"
@@ -38,6 +43,12 @@ type Store interface {
 	StartDialog(projectName, featureID string) error
 	RespondToDialog(projectName, featureID string, response string, final bool) error
 	ReopenDialog(projectName, featureID string, message string) error
+	RecordPoll(projectName string)
+	GetLastPollTime(projectName string) (time.Time, bool)
+	SubmitClientDialog(projectName, featureID, updatedDescription, questions string) error
+	ReadDescriptionVersion(projectName, featureID string, version int) (string, error)
+	ReadQuestions(projectName, featureID string, round int) (string, error)
+	ReadResponse(projectName, featureID string, round int) (string, error)
 }
 
 type contextKey string
@@ -75,6 +86,9 @@ func New(cfg *config.Config, st Store) *http.Server {
 		r.Get("/api/v1/project", handleGetOwnProject(st))
 		r.Get("/api/v1/features", handleListClientFeatures(st))
 		r.Get("/api/v1/features/{id}", handleGetClientFeature(st))
+		r.Get("/api/v1/poll", handlePoll(st))
+		r.Get("/api/v1/features/{id}/pending", handleGetPending(st))
+		r.Post("/api/v1/features/{id}/submit-dialog", handleSubmitDialog(st))
 	})
 
 	return &http.Server{
@@ -154,6 +168,29 @@ type projectResponse struct {
 	Name         string `json:"name"`
 	Token        string `json:"token,omitempty"`
 	FeatureCount int    `json:"feature_count"`
+	Connectivity string `json:"connectivity,omitempty"`
+}
+
+// connectivityStatus returns a human-readable connectivity status string based on last poll time.
+func connectivityStatus(lastPoll time.Time) string {
+	if lastPoll.IsZero() {
+		return ""
+	}
+	elapsed := time.Since(lastPoll)
+	if elapsed <= 2*pollTimeout {
+		return "Connected"
+	}
+	return "Last seen: " + humanDuration(elapsed) + " ago"
+}
+
+func humanDuration(d time.Duration) string {
+	if d < time.Minute {
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	}
+	if d < time.Hour {
+		return fmt.Sprintf("%dm%ds", int(d.Minutes()), int(d.Seconds())%60)
+	}
+	return fmt.Sprintf("%dh%dm", int(d.Hours()), int(d.Minutes())%60)
 }
 
 func handleCreateProject(st Store) http.HandlerFunc {
@@ -202,9 +239,11 @@ func handleListProjects(st Store) http.HandlerFunc {
 		resp := make([]projectResponse, 0, len(projects))
 		for _, p := range projects {
 			features, _ := st.ListFeatures(p.Name, nil)
+			lastPoll, _ := st.GetLastPollTime(p.Name)
 			resp = append(resp, projectResponse{
 				Name:         p.Name,
 				FeatureCount: len(features),
+				Connectivity: connectivityStatus(lastPoll),
 			})
 		}
 		writeJSON(w, http.StatusOK, resp)
@@ -220,9 +259,11 @@ func handleGetProject(st Store) http.HandlerFunc {
 			return
 		}
 		features, _ := st.ListFeatures(project.Name, nil)
+		lastPoll, _ := st.GetLastPollTime(project.Name)
 		writeJSON(w, http.StatusOK, projectResponse{
 			Name:         project.Name,
 			FeatureCount: len(features),
+			Connectivity: connectivityStatus(lastPoll),
 		})
 	}
 }
@@ -250,9 +291,11 @@ func handleGetOwnProject(st Store) http.HandlerFunc {
 			return
 		}
 		features, _ := st.ListFeatures(project.Name, nil)
+		lastPoll, _ := st.GetLastPollTime(project.Name)
 		writeJSON(w, http.StatusOK, projectResponse{
 			Name:         project.Name,
 			FeatureCount: len(features),
+			Connectivity: connectivityStatus(lastPoll),
 		})
 	}
 }
@@ -624,6 +667,226 @@ func handleReopenDialog(st Store) http.HandlerFunc {
 			return
 		}
 		f, err := st.GetFeature(projectName, featureID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "internal error")
+			return
+		}
+		writeJSON(w, http.StatusOK, toFeatureResponse(*f))
+	}
+}
+
+// --- Client dialog handlers ---
+
+// pollResponse is the response for GET /api/v1/poll.
+type pollResponse struct {
+	Action      string `json:"action"`
+	FeatureID   string `json:"feature_id"`
+	FeatureName string `json:"feature_name"`
+}
+
+// findActionableFeature returns the first feature in awaiting_client or ready_to_generate status.
+func findActionableFeature(st Store, projectName string) (model.Feature, model.FeatureAction, bool) {
+	features, err := st.ListFeatures(projectName, nil)
+	if err != nil {
+		return model.Feature{}, 0, false
+	}
+	for _, f := range features {
+		switch f.Status {
+		case model.StatusAwaitingClient:
+			return f, model.ActionDialogStep, true
+		case model.StatusReadyToGenerate:
+			return f, model.ActionGenerate, true
+		}
+	}
+	return model.Feature{}, 0, false
+}
+
+// handlePoll handles GET /api/v1/poll — long-poll until work is available.
+// Returns 200 with action JSON when work is available; 204 on timeout.
+// Accepts optional ?timeout=N query param (seconds, max 30) for testing.
+func handlePoll(st Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		project, ok := r.Context().Value(projectContextKey).(*model.Project)
+		if !ok || project == nil {
+			writeError(w, http.StatusInternalServerError, "internal error")
+			return
+		}
+
+		st.RecordPoll(project.Name)
+
+		timeout := pollTimeout
+		if q := r.URL.Query().Get("timeout"); q != "" {
+			if secs, err := strconv.Atoi(q); err == nil && secs > 0 && secs <= int(pollTimeout.Seconds()) {
+				timeout = time.Duration(secs) * time.Second
+			}
+		}
+
+		ctx, cancel := context.WithTimeout(r.Context(), timeout)
+		defer cancel()
+
+		ticker := time.NewTicker(500 * time.Millisecond)
+		defer ticker.Stop()
+
+		for {
+			if feature, action, found := findActionableFeature(st, project.Name); found {
+				writeJSON(w, http.StatusOK, pollResponse{
+					Action:      action.String(),
+					FeatureID:   feature.ID,
+					FeatureName: feature.Name,
+				})
+				return
+			}
+
+			select {
+			case <-ctx.Done():
+				w.WriteHeader(http.StatusNoContent)
+				return
+			case <-ticker.C:
+				// Check again
+			}
+		}
+	}
+}
+
+// pendingResponse is the response for GET /api/v1/features/{id}/pending.
+type pendingResponse struct {
+	Iteration          int    `json:"iteration"`
+	FeatureDescription string `json:"feature_description"`
+	Questions          string `json:"questions"`
+	UserResponse       string `json:"user_response"`
+}
+
+// handleGetPending handles GET /api/v1/features/{id}/pending.
+func handleGetPending(st Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		project, ok := r.Context().Value(projectContextKey).(*model.Project)
+		if !ok || project == nil {
+			writeError(w, http.StatusInternalServerError, "internal error")
+			return
+		}
+		featureID := chi.URLParam(r, "id")
+
+		feature, err := st.GetFeature(project.Name, featureID)
+		if err != nil {
+			if strings.Contains(err.Error(), "not found") {
+				writeError(w, http.StatusNotFound, err.Error())
+			} else {
+				writeError(w, http.StatusInternalServerError, "internal error")
+			}
+			return
+		}
+
+		if feature.Status != model.StatusAwaitingClient && feature.Status != model.StatusReadyToGenerate {
+			writeError(w, http.StatusConflict, "feature is not in an actionable state")
+			return
+		}
+
+		N := feature.CurrentIteration
+		resp := pendingResponse{Iteration: N}
+
+		if feature.Status == model.StatusReadyToGenerate {
+			desc, err := st.ReadDescriptionVersion(project.Name, featureID, N)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "internal error")
+				return
+			}
+			resp.FeatureDescription = desc
+			writeJSON(w, http.StatusOK, resp)
+			return
+		}
+
+		// status == awaiting_client
+		if N == 0 {
+			// First round: return initial description only.
+			desc, err := st.ReadDescriptionVersion(project.Name, featureID, 0)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "internal error")
+				return
+			}
+			resp.FeatureDescription = desc
+			writeJSON(w, http.StatusOK, resp)
+			return
+		}
+
+		// N >= 1: check if description_vN exists (subsequent round) or not (reopen).
+		desc, err := st.ReadDescriptionVersion(project.Name, featureID, N)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "internal error")
+			return
+		}
+		if desc != "" {
+			// Subsequent round: client wrote description_vN and questions_vN, human responded.
+			questions, err := st.ReadQuestions(project.Name, featureID, N)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "internal error")
+				return
+			}
+			response, err := st.ReadResponse(project.Name, featureID, N)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "internal error")
+				return
+			}
+			resp.FeatureDescription = desc
+			resp.Questions = questions
+			resp.UserResponse = response
+		} else {
+			// Reopen: response_vN has the reopen message, description is from previous round.
+			prevDesc, err := st.ReadDescriptionVersion(project.Name, featureID, N-1)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "internal error")
+				return
+			}
+			response, err := st.ReadResponse(project.Name, featureID, N)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "internal error")
+				return
+			}
+			resp.FeatureDescription = prevDesc
+			resp.UserResponse = response
+		}
+
+		writeJSON(w, http.StatusOK, resp)
+	}
+}
+
+// submitDialogRequest is the request body for POST /api/v1/features/{id}/submit-dialog.
+type submitDialogRequest struct {
+	UpdatedDescription string `json:"updated_description"`
+	Questions          string `json:"questions"`
+}
+
+// handleSubmitDialog handles POST /api/v1/features/{id}/submit-dialog.
+func handleSubmitDialog(st Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		project, ok := r.Context().Value(projectContextKey).(*model.Project)
+		if !ok || project == nil {
+			writeError(w, http.StatusInternalServerError, "internal error")
+			return
+		}
+		featureID := chi.URLParam(r, "id")
+
+		var req submitDialogRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+		if req.UpdatedDescription == "" {
+			writeError(w, http.StatusBadRequest, "updated_description is required")
+			return
+		}
+
+		if err := st.SubmitClientDialog(project.Name, featureID, req.UpdatedDescription, req.Questions); err != nil {
+			if strings.Contains(err.Error(), "not found") {
+				writeError(w, http.StatusNotFound, err.Error())
+			} else if strings.Contains(err.Error(), "invalid transition") {
+				writeError(w, http.StatusConflict, err.Error())
+			} else {
+				writeError(w, http.StatusInternalServerError, "internal error")
+			}
+			return
+		}
+
+		f, err := st.GetFeature(project.Name, featureID)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "internal error")
 			return
