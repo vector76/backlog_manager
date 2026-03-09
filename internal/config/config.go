@@ -14,6 +14,8 @@ type Config struct {
 	DashboardUser     string `json:"dashboard_user"`
 	DashboardPassword string `json:"dashboard_password"`
 	BeadsServerURL    string `json:"beads_server_url"`
+	ViewerUser        string `json:"viewer_user,omitempty"`
+	ViewerPassword    string `json:"viewer_password,omitempty"`
 }
 
 // Load reads and validates a config JSON file from the given path.

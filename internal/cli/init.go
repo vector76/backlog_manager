@@ -40,6 +40,8 @@ func newInitCmd() *cobra.Command {
 				return err
 			}
 			beadsURL := initPromptBeadsURL(r, w)
+			viewerUser := initPromptViewerUser(r, w)
+			viewerPassword := initPromptViewerPassword(r, w)
 
 			cfg := config.Config{
 				Port:              port,
@@ -47,6 +49,8 @@ func newInitCmd() *cobra.Command {
 				DashboardUser:     user,
 				DashboardPassword: password,
 				BeadsServerURL:    beadsURL,
+				ViewerUser:        viewerUser,
+				ViewerPassword:    viewerPassword,
 			}
 
 			data, err := json.MarshalIndent(cfg, "", "  ")
@@ -127,6 +131,18 @@ func initPromptPassword(r *bufio.Reader, w io.Writer) (string, error) {
 
 func initPromptBeadsURL(r *bufio.Reader, w io.Writer) string {
 	fmt.Fprint(w, "Beads Server URL (optional, press Enter to skip): ")
+	s, _ := initReadLine(r)
+	return s
+}
+
+func initPromptViewerUser(r *bufio.Reader, w io.Writer) string {
+	fmt.Fprint(w, "Viewer user (optional, press Enter to disable): ")
+	s, _ := initReadLine(r)
+	return s
+}
+
+func initPromptViewerPassword(r *bufio.Reader, w io.Writer) string {
+	fmt.Fprint(w, "Viewer password (optional, press Enter to skip): ")
 	s, _ := initReadLine(r)
 	return s
 }

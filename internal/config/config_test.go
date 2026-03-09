@@ -106,6 +106,69 @@ func TestLoad_MissingDashboardUser(t *testing.T) {
 	}
 }
 
+func TestLoad_ViewerFieldsAbsent(t *testing.T) {
+	dir := t.TempDir()
+	path := writeConfig(t, dir, map[string]any{
+		"port":               8080,
+		"data_dir":           "./data",
+		"dashboard_user":     "admin",
+		"dashboard_password": "changeme",
+	})
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.ViewerUser != "" {
+		t.Errorf("expected empty viewer_user, got %q", cfg.ViewerUser)
+	}
+	if cfg.ViewerPassword != "" {
+		t.Errorf("expected empty viewer_password, got %q", cfg.ViewerPassword)
+	}
+}
+
+func TestLoad_ViewerFieldsPresent(t *testing.T) {
+	dir := t.TempDir()
+	path := writeConfig(t, dir, map[string]any{
+		"port":               8080,
+		"data_dir":           "./data",
+		"dashboard_user":     "admin",
+		"dashboard_password": "changeme",
+		"viewer_user":        "viewer",
+		"viewer_password":    "viewpass",
+	})
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.ViewerUser != "viewer" {
+		t.Errorf("expected viewer_user viewer, got %q", cfg.ViewerUser)
+	}
+	if cfg.ViewerPassword != "viewpass" {
+		t.Errorf("expected viewer_password viewpass, got %q", cfg.ViewerPassword)
+	}
+}
+
+func TestLoad_ViewerFieldsPartial(t *testing.T) {
+	dir := t.TempDir()
+	path := writeConfig(t, dir, map[string]any{
+		"port":               8080,
+		"data_dir":           "./data",
+		"dashboard_user":     "admin",
+		"dashboard_password": "changeme",
+		"viewer_user":        "viewer",
+	})
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.ViewerUser != "viewer" {
+		t.Errorf("expected viewer_user viewer, got %q", cfg.ViewerUser)
+	}
+	if cfg.ViewerPassword != "" {
+		t.Errorf("expected empty viewer_password, got %q", cfg.ViewerPassword)
+	}
+}
+
 func TestLoad_MissingDashboardPassword(t *testing.T) {
 	dir := t.TempDir()
 	path := writeConfig(t, dir, map[string]any{

@@ -174,6 +174,36 @@ func TestInitCmd_RefusesOverwrite(t *testing.T) {
 	}
 }
 
+func TestInitCmd_ViewerFieldsBlank(t *testing.T) {
+	// Port: default, DataDir: default, User: default, Password: secret, BeadsURL: skip, ViewerUser: skip, ViewerPassword: skip
+	outPath, err := runInitCmd(t, "\n\n\nsecret\n\n\n\n")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	cfg := readInitConfig(t, outPath)
+	if v, ok := cfg["viewer_user"]; ok && v != "" {
+		t.Errorf("expected empty viewer_user, got %v", v)
+	}
+	if v, ok := cfg["viewer_password"]; ok && v != "" {
+		t.Errorf("expected empty viewer_password, got %v", v)
+	}
+}
+
+func TestInitCmd_ViewerFieldsProvided(t *testing.T) {
+	// Port: default, DataDir: default, User: default, Password: secret, BeadsURL: skip, ViewerUser: viewer, ViewerPassword: vpass
+	outPath, err := runInitCmd(t, "\n\n\nsecret\n\nviewer\nvpass\n")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	cfg := readInitConfig(t, outPath)
+	if cfg["viewer_user"] != "viewer" {
+		t.Errorf("expected viewer_user viewer, got %v", cfg["viewer_user"])
+	}
+	if cfg["viewer_password"] != "vpass" {
+		t.Errorf("expected viewer_password vpass, got %v", cfg["viewer_password"])
+	}
+}
+
 func TestInitCmd_RegisteredOnRoot(t *testing.T) {
 	root := cli.NewRootCmd()
 	names := make(map[string]bool)
