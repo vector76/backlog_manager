@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -11,13 +12,18 @@ import (
 )
 
 func newPollCmd() *cobra.Command {
-	return &cobra.Command{
+	var timeoutSec int
+	cmd := &cobra.Command{
 		Use:   "poll",
 		Short: "Block until work is available, then print action JSON to stdout",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c := client.New()
 			if c.Token == "" {
 				return fmt.Errorf("BM_TOKEN is required (set env var or .env file)")
+			}
+			var deadline time.Time
+			if timeoutSec > 0 {
+				deadline = time.Now().Add(time.Duration(timeoutSec) * time.Second)
 			}
 			// Loop until work is available (server returns 204 on timeout; client retries).
 			for {
@@ -30,10 +36,18 @@ func newPollCmd() *cobra.Command {
 					enc.SetIndent("", "  ")
 					return enc.Encode(result)
 				}
-				// 204 timeout: server found no work; retry immediately.
+				// 204 timeout: server found no work; check deadline then retry.
+				if timeoutSec > 0 && time.Now().After(deadline) {
+					enc := json.NewEncoder(cmd.OutOrStdout())
+					enc.SetIndent("", "  ")
+					enc.Encode(map[string]any{"action": "timeout"})
+					return fmt.Errorf("poll timed out after %d seconds", timeoutSec)
+				}
 			}
 		},
 	}
+	cmd.Flags().IntVar(&timeoutSec, "timeout", 300, "Seconds to wait for work before giving up (0 = no timeout, default 300)")
+	return cmd
 }
 
 func newFetchCmd() *cobra.Command {
