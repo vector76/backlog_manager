@@ -1929,6 +1929,103 @@ func TestHandleCompleteFeature_DependencyResolution(t *testing.T) {
 	}
 }
 
+// --- direct_to_bead API tests ---
+
+func TestHandleCreateFeature_DirectToBead(t *testing.T) {
+	srv, _ := newTestServer(t)
+	auth := basicAuth("admin", "secret")
+	doRequest(t, srv, "POST", "/api/v1/projects", map[string]any{"name": "dtbproj"}, auth)
+
+	w := doRequest(t, srv, "POST", "/api/v1/projects/dtbproj/features", map[string]any{
+		"name":           "DTB Feature",
+		"description":    "Goes straight to bead.",
+		"direct_to_bead": true,
+	}, auth)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp["status"] != "ready_to_generate" {
+		t.Errorf("expected status ready_to_generate, got %v", resp["status"])
+	}
+	if resp["direct_to_bead"] != true {
+		t.Errorf("expected direct_to_bead=true, got %v", resp["direct_to_bead"])
+	}
+}
+
+func TestHandleCreateFeature_DirectToBead_ImmediatelyPollable(t *testing.T) {
+	srv, _ := newTestServer(t)
+	auth := basicAuth("admin", "secret")
+
+	w := doRequest(t, srv, "POST", "/api/v1/projects", map[string]any{"name": "dtbpoll"}, auth)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create project: %d", w.Code)
+	}
+	var projResp map[string]any
+	json.NewDecoder(w.Body).Decode(&projResp)
+	token := projResp["token"].(string)
+
+	// Create a direct_to_bead feature — should immediately be in ready_to_generate.
+	w = doRequest(t, srv, "POST", "/api/v1/projects/dtbpoll/features", map[string]any{
+		"name":           "Pollable DTB",
+		"direct_to_bead": true,
+	}, auth)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create feature: %d", w.Code)
+	}
+
+	// Poll should return action=generate immediately.
+	w = doRequest(t, srv, "GET", "/api/v1/poll?timeout=1", nil, bearerAuth(token))
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 from poll, got %d: %s", w.Code, w.Body.String())
+	}
+	var pollResp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&pollResp); err != nil {
+		t.Fatal(err)
+	}
+	if pollResp["action"] != "generate" {
+		t.Errorf("expected action=generate, got %v", pollResp["action"])
+	}
+}
+
+func TestHandleCreateFeature_NormalFeature_StillDraft(t *testing.T) {
+	srv, _ := newTestServer(t)
+	auth := basicAuth("admin", "secret")
+
+	w := doRequest(t, srv, "POST", "/api/v1/projects", map[string]any{"name": "draftproj"}, auth)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create project: %d", w.Code)
+	}
+	var projResp map[string]any
+	json.NewDecoder(w.Body).Decode(&projResp)
+	token := projResp["token"].(string)
+
+	// Create a normal feature (no direct_to_bead).
+	w = doRequest(t, srv, "POST", "/api/v1/projects/draftproj/features", map[string]any{
+		"name":        "Normal Feature",
+		"description": "No direct_to_bead.",
+	}, auth)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp["status"] != "draft" {
+		t.Errorf("expected status draft, got %v", resp["status"])
+	}
+
+	// Poll should return 204 (no actionable work) since the feature is still in draft.
+	w = doRequest(t, srv, "GET", "/api/v1/poll?timeout=1", nil, bearerAuth(token))
+	if w.Code != http.StatusNoContent {
+		t.Errorf("expected 204 (no work for draft feature), got %d: %s", w.Code, w.Body.String())
+	}
+}
+
 func TestHandleCompleteFeature_WrongStatus(t *testing.T) {
 	srv, st := newTestServer(t)
 	featureID := setupFeatureAtFullySpecified(t, srv, st, "complete2")
