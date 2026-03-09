@@ -1181,3 +1181,148 @@ func TestWebCreateFeatureWithDirectToBead(t *testing.T) {
 		t.Errorf("expected 'Direct to bead' text after creating feature with direct_to_bead=true")
 	}
 }
+
+// TestWebFeatureDetailGenerateAfterDropdown checks that the Generate After dropdown
+// includes only features in the explicitly allowed statuses and excludes all others.
+func TestWebFeatureDetailGenerateAfterDropdown(t *testing.T) {
+	srv, st := newTestServer(t)
+	cookie := loginWeb(t, srv)
+
+	const proj = "ga-dropdown-project"
+	if _, err := st.CreateProject(proj, "tok-ga"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create and advance subject feature to fully_specified.
+	subject, err := st.CreateFeature(proj, "Subject Feature", "desc", false, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.TransitionStatus(proj, subject.ID, model.StatusAwaitingClient); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.TransitionStatus(proj, subject.ID, model.StatusFullySpecified); err != nil {
+		t.Fatal(err)
+	}
+
+	// Helper to chain transitions.
+	transitionThrough := func(featureID string, statuses ...model.FeatureStatus) {
+		t.Helper()
+		for _, s := range statuses {
+			if err := st.TransitionStatus(proj, featureID, s); err != nil {
+				t.Fatalf("TransitionStatus(%v) for %s: %v", s, featureID, err)
+			}
+		}
+	}
+
+	// Create one sibling per status.
+	createSibling := func(name string) string {
+		t.Helper()
+		f, err := st.CreateFeature(proj, name, "desc", false, "")
+		if err != nil {
+			t.Fatalf("CreateFeature %q: %v", name, err)
+		}
+		return f.ID
+	}
+
+	createSibling("sibling-draft") // stays in draft
+
+	awaitingClientID := createSibling("sibling-awaiting-client")
+	transitionThrough(awaitingClientID, model.StatusAwaitingClient)
+
+	awaitingHumanID := createSibling("sibling-awaiting-human")
+	transitionThrough(awaitingHumanID, model.StatusAwaitingClient, model.StatusAwaitingHuman)
+
+	fullySpecifiedID := createSibling("sibling-fully-specified")
+	transitionThrough(fullySpecifiedID, model.StatusAwaitingClient, model.StatusFullySpecified)
+
+	waitingID := createSibling("sibling-waiting")
+	transitionThrough(waitingID, model.StatusAwaitingClient, model.StatusFullySpecified, model.StatusWaiting)
+
+	readyToGenerateID := createSibling("sibling-ready-to-generate")
+	transitionThrough(readyToGenerateID, model.StatusAwaitingClient, model.StatusFullySpecified, model.StatusReadyToGenerate)
+
+	generatingID := createSibling("sibling-generating")
+	transitionThrough(generatingID, model.StatusAwaitingClient, model.StatusFullySpecified, model.StatusReadyToGenerate, model.StatusGenerating)
+
+	beadsCreatedID := createSibling("sibling-beads-created")
+	transitionThrough(beadsCreatedID, model.StatusAwaitingClient, model.StatusFullySpecified, model.StatusReadyToGenerate, model.StatusGenerating, model.StatusBeadsCreated)
+
+	doneID := createSibling("sibling-done")
+	transitionThrough(doneID, model.StatusAwaitingClient, model.StatusFullySpecified, model.StatusReadyToGenerate, model.StatusGenerating, model.StatusBeadsCreated, model.StatusDone)
+
+	abandonedID := createSibling("sibling-abandoned")
+	transitionThrough(abandonedID, model.StatusAbandoned)
+
+	haltedID := createSibling("sibling-halted")
+	transitionThrough(haltedID, model.StatusHalted)
+
+	// GET the subject feature's detail page.
+	w := webRequest(t, srv, "GET", "/project/"+proj+"/feature/"+subject.ID, "", cookie)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	body := w.Body.String()
+
+	// Features that SHOULD appear in the generate-after dropdown.
+	for _, name := range []string{
+		"sibling-fully-specified",
+		"sibling-waiting",
+		"sibling-ready-to-generate",
+		"sibling-generating",
+		"sibling-beads-created",
+	} {
+		if !strings.Contains(body, name) {
+			t.Errorf("expected %q to appear in generate-after dropdown, but it was absent", name)
+		}
+	}
+
+	// Features that MUST NOT appear in the generate-after dropdown.
+	for _, name := range []string{
+		"sibling-draft",
+		"sibling-awaiting-client",
+		"sibling-awaiting-human",
+		"sibling-done",
+		"sibling-abandoned",
+		"sibling-halted",
+	} {
+		if strings.Contains(body, name) {
+			t.Errorf("expected %q to be absent from generate-after dropdown, but it was present", name)
+		}
+	}
+}
+
+// TestWebFeatureDetailGenerateAfterDropdown_NoEligibleFeatures checks that the
+// generate-after form is absent when there are no eligible sibling features.
+func TestWebFeatureDetailGenerateAfterDropdown_NoEligibleFeatures(t *testing.T) {
+	srv, st := newTestServer(t)
+	cookie := loginWeb(t, srv)
+
+	const proj = "ga-no-siblings-project"
+	if _, err := st.CreateProject(proj, "tok-ga-ns"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create subject feature and advance to fully_specified (no siblings).
+	subject, err := st.CreateFeature(proj, "Lonely Feature", "desc", false, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.TransitionStatus(proj, subject.ID, model.StatusAwaitingClient); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.TransitionStatus(proj, subject.ID, model.StatusFullySpecified); err != nil {
+		t.Fatal(err)
+	}
+
+	w := webRequest(t, srv, "GET", "/project/"+proj+"/feature/"+subject.ID, "", cookie)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	body := w.Body.String()
+
+	// The generate-after form must not appear when there are no eligible siblings.
+	if strings.Contains(body, "generate-after") {
+		t.Errorf("expected generate-after form to be absent when no eligible siblings exist")
+	}
+}
