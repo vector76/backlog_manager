@@ -353,12 +353,13 @@ func handleWebCreateFeature(st Store, hub *NotifyHub) http.HandlerFunc {
 			http.Redirect(w, r, "/project/"+projectName+"/new", http.StatusFound)
 			return
 		}
-		if _, err := st.CreateFeature(projectName, name, description); err != nil {
+		feat, err := st.CreateFeature(projectName, name, description)
+		if err != nil {
 			http.Redirect(w, r, "/", http.StatusFound)
 			return
 		}
 		hub.NotifyDashboard()
-		http.Redirect(w, r, "/", http.StatusFound)
+		http.Redirect(w, r, "/project/"+projectName+"/feature/"+feat.ID, http.StatusFound)
 	}
 }
 

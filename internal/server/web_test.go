@@ -312,14 +312,16 @@ func TestWebCreateFeature(t *testing.T) {
 	if w.Code != http.StatusFound {
 		t.Errorf("expected 302 redirect, got %d", w.Code)
 	}
-	if loc := w.Header().Get("Location"); loc != "/" {
-		t.Errorf("expected redirect to dashboard, got: %s", loc)
+	loc := w.Header().Get("Location")
+	prefix := "/project/create-feat-project/feature/"
+	if !strings.HasPrefix(loc, prefix) || len(loc) <= len(prefix) {
+		t.Errorf("expected redirect to feature detail page, got: %s", loc)
 	}
 
-	// Verify feature appears on dashboard.
-	w2 := webRequest(t, srv, "GET", "/", "", cookie)
+	// Verify feature detail page is correctly served.
+	w2 := webRequest(t, srv, "GET", loc, "", cookie)
 	if !strings.Contains(w2.Body.String(), "My New Feature") {
-		t.Errorf("expected feature name in dashboard")
+		t.Errorf("expected feature name in detail page")
 	}
 }
 
