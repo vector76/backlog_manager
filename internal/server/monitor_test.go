@@ -15,6 +15,36 @@ import (
 	"github.com/vector76/backlog_manager/internal/store"
 )
 
+// createWaitingDependent creates a feature in waiting state that depends on providerID.
+// Returns the new feature's ID.
+func createWaitingDependent(t *testing.T, st *store.Store, projName, providerID string) string {
+	t.Helper()
+	waitFeat, err := st.CreateFeature(projName, "Dependent Feature", "desc", false, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range []model.FeatureStatus{
+		model.StatusAwaitingClient,
+		model.StatusFullySpecified,
+	} {
+		if err := st.TransitionStatus(projName, waitFeat.ID, s); err != nil {
+			t.Fatalf("transition to %s: %v", s, err)
+		}
+	}
+	wf, err := st.GetFeature(projName, waitFeat.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wf.GenerateAfter = providerID
+	if err := st.UpdateFeature(wf); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.TransitionStatus(projName, waitFeat.ID, model.StatusWaiting); err != nil {
+		t.Fatal(err)
+	}
+	return waitFeat.ID
+}
+
 // newMonitorStore sets up a test store with a project and feature in beads_created status.
 func newMonitorStore(t *testing.T, beadIDs []string) (*store.Store, string, string) {
 	t.Helper()
@@ -135,29 +165,7 @@ func TestBeadMonitor_poll_allClosed_triggersDependencyResolution(t *testing.T) {
 	st, projName, featureID := newMonitorStore(t, beadIDs)
 
 	// Create a second feature in waiting state that depends on the first.
-	waitFeat, err := st.CreateFeature(projName, "Dependent Feature", "desc", false, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, s := range []model.FeatureStatus{
-		model.StatusAwaitingClient,
-		model.StatusFullySpecified,
-	} {
-		if err := st.TransitionStatus(projName, waitFeat.ID, s); err != nil {
-			t.Fatalf("transition to %s: %v", s, err)
-		}
-	}
-	wf, err := st.GetFeature(projName, waitFeat.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	wf.GenerateAfter = featureID
-	if err := st.UpdateFeature(wf); err != nil {
-		t.Fatal(err)
-	}
-	if err := st.TransitionStatus(projName, waitFeat.ID, model.StatusWaiting); err != nil {
-		t.Fatal(err)
-	}
+	waitID := createWaitingDependent(t, st, projName, featureID)
 
 	srv := mockBeadsServer(t, map[string]string{"bd-c1": "closed"})
 	defer srv.Close()
@@ -176,7 +184,7 @@ func TestBeadMonitor_poll_allClosed_triggersDependencyResolution(t *testing.T) {
 	}
 
 	// Dependent feature should be unblocked to ready_to_generate.
-	dep, err := st.GetFeature(projName, waitFeat.ID)
+	dep, err := st.GetFeature(projName, waitID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -190,29 +198,7 @@ func TestBeadMonitor_poll_beadsCreated_doesNotUnblockDependent(t *testing.T) {
 	st, projName, featureID := newMonitorStore(t, beadIDs)
 
 	// Create a dependent feature in waiting state.
-	waitFeat, err := st.CreateFeature(projName, "Dependent Feature", "desc", false, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, s := range []model.FeatureStatus{
-		model.StatusAwaitingClient,
-		model.StatusFullySpecified,
-	} {
-		if err := st.TransitionStatus(projName, waitFeat.ID, s); err != nil {
-			t.Fatalf("transition to %s: %v", s, err)
-		}
-	}
-	wf, err := st.GetFeature(projName, waitFeat.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	wf.GenerateAfter = featureID
-	if err := st.UpdateFeature(wf); err != nil {
-		t.Fatal(err)
-	}
-	if err := st.TransitionStatus(projName, waitFeat.ID, model.StatusWaiting); err != nil {
-		t.Fatal(err)
-	}
+	waitID := createWaitingDependent(t, st, projName, featureID)
 
 	// Bead is still open (not closed), so provider should stay in beads_created.
 	srv := mockBeadsServer(t, map[string]string{"bd-e1": "open"})
@@ -232,7 +218,7 @@ func TestBeadMonitor_poll_beadsCreated_doesNotUnblockDependent(t *testing.T) {
 	}
 
 	// Dependent feature must remain in waiting.
-	dep, err := st.GetFeature(projName, waitFeat.ID)
+	dep, err := st.GetFeature(projName, waitID)
 	if err != nil {
 		t.Fatal(err)
 	}

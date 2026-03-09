@@ -2041,7 +2041,9 @@ func TestHandleBeadsDone_WaitingDependentStaysWaiting(t *testing.T) {
 		t.Fatalf("create waiter: %d", w.Code)
 	}
 	var waiterFeat map[string]any
-	json.NewDecoder(w.Body).Decode(&waiterFeat)
+	if err := json.NewDecoder(w.Body).Decode(&waiterFeat); err != nil {
+		t.Fatalf("decode create-waiter response: %v", err)
+	}
 	waiterID := waiterFeat["id"].(string)
 
 	// Advance B to fully_specified, set GenerateAfter = A, then transition to waiting.
