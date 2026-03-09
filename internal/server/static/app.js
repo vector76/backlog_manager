@@ -267,6 +267,12 @@
       }
 
       function patchFeature(data) {
+        // Update feature title
+        var titleEl = livePage.querySelector('h1');
+        if (titleEl && data.name) {
+          titleEl.textContent = data.name;
+        }
+
         // Update status badge
         var badge = livePage.querySelector('.badge');
         if (badge) {

@@ -1388,3 +1388,107 @@ func TestWebDeleteNonDraftFeature_Rejected(t *testing.T) {
 		t.Errorf("expected feature to still exist (200), got %d", got.Code)
 	}
 }
+
+// TestWebRenameFeature_Valid checks that a valid rename POST redirects back and updates the name.
+func TestWebRenameFeature_Valid(t *testing.T) {
+	srv, st := newTestServer(t)
+	cookie := loginWeb(t, srv)
+
+	if _, err := st.CreateProject("rename-project", "tok-rename"); err != nil {
+		t.Fatal(err)
+	}
+	f, err := st.CreateFeature("rename-project", "Original Name", "desc", false, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	featurePage := "/project/rename-project/feature/" + f.ID
+	body := url.Values{"name": {"New Name"}}.Encode()
+	w := webRequest(t, srv, "POST", featurePage+"/rename", body, cookie)
+	if w.Code != http.StatusFound {
+		t.Fatalf("expected 302 redirect, got %d", w.Code)
+	}
+	if loc := w.Header().Get("Location"); loc != featurePage {
+		t.Errorf("expected redirect to feature page %s, got %s", featurePage, loc)
+	}
+
+	// Verify name was updated.
+	got := doRequest(t, srv, "GET", "/api/v1/projects/rename-project/features/"+f.ID, nil, basicAuth("admin", "secret"))
+	if got.Code != http.StatusOK {
+		t.Fatalf("expected 200 getting feature, got %d", got.Code)
+	}
+	if !strings.Contains(got.Body.String(), "New Name") {
+		t.Errorf("expected updated name in response, got: %s", got.Body.String())
+	}
+}
+
+// TestWebRenameFeature_Empty checks that an empty name redirects back without changing the name.
+func TestWebRenameFeature_Empty(t *testing.T) {
+	srv, st := newTestServer(t)
+	cookie := loginWeb(t, srv)
+
+	if _, err := st.CreateProject("rename-empty-project", "tok-rename-empty"); err != nil {
+		t.Fatal(err)
+	}
+	f, err := st.CreateFeature("rename-empty-project", "Unchanged Name", "desc", false, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	featurePage := "/project/rename-empty-project/feature/" + f.ID
+	body := url.Values{"name": {""}}.Encode()
+	w := webRequest(t, srv, "POST", featurePage+"/rename", body, cookie)
+	if w.Code != http.StatusFound {
+		t.Fatalf("expected 302 redirect, got %d", w.Code)
+	}
+	if loc := w.Header().Get("Location"); loc != featurePage {
+		t.Errorf("expected redirect to feature page %s, got %s", featurePage, loc)
+	}
+
+	// Verify name was NOT changed.
+	got := doRequest(t, srv, "GET", "/api/v1/projects/rename-empty-project/features/"+f.ID, nil, basicAuth("admin", "secret"))
+	if got.Code != http.StatusOK {
+		t.Fatalf("expected 200 getting feature, got %d", got.Code)
+	}
+	if !strings.Contains(got.Body.String(), "Unchanged Name") {
+		t.Errorf("expected original name in response, got: %s", got.Body.String())
+	}
+}
+
+// TestWebRenameFeature_NonDraftStatus checks that rename works for non-draft features.
+func TestWebRenameFeature_NonDraftStatus(t *testing.T) {
+	srv, st := newTestServer(t)
+	cookie := loginWeb(t, srv)
+
+	if _, err := st.CreateProject("rename-nondraft-project", "tok-rename-nondraft"); err != nil {
+		t.Fatal(err)
+	}
+	f, err := st.CreateFeature("rename-nondraft-project", "Draft Name", "desc", false, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Transition out of draft.
+	if err := st.StartDialog("rename-nondraft-project", f.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	featurePage := "/project/rename-nondraft-project/feature/" + f.ID
+	body := url.Values{"name": {"Non-Draft New Name"}}.Encode()
+	w := webRequest(t, srv, "POST", featurePage+"/rename", body, cookie)
+	if w.Code != http.StatusFound {
+		t.Fatalf("expected 302 redirect, got %d", w.Code)
+	}
+	if loc := w.Header().Get("Location"); loc != featurePage {
+		t.Errorf("expected redirect to feature page %s, got %s", featurePage, loc)
+	}
+
+	// Verify name was updated.
+	got := doRequest(t, srv, "GET", "/api/v1/projects/rename-nondraft-project/features/"+f.ID, nil, basicAuth("admin", "secret"))
+	if got.Code != http.StatusOK {
+		t.Fatalf("expected 200 getting feature, got %d", got.Code)
+	}
+	if !strings.Contains(got.Body.String(), "Non-Draft New Name") {
+		t.Errorf("expected updated name in response, got: %s", got.Body.String())
+	}
+}

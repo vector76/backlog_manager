@@ -6,6 +6,13 @@
     <h1 style="margin-bottom:0.25rem">{{.Feature.Name}}</h1>
     <span class="badge {{statusBadgeClass .Feature.Status}}">{{statusLabel .Feature.Status}}</span>
     <span class="muted" style="font-size:0.85rem;margin-left:0.5rem">updated {{.Feature.UpdatedAt}}</span>
+    <details style="margin-top:0.5rem">
+      <summary style="cursor:pointer;font-size:0.9rem">Edit title</summary>
+      <form method="post" action="/project/{{.ProjectName}}/feature/{{.Feature.ID}}/rename" style="margin-top:0.5rem;display:flex;gap:0.5rem">
+        <input type="text" name="name" value="{{.Feature.Name}}" required style="flex:1;padding:0.25rem 0.5rem" minlength="1">
+        <button type="submit" class="btn">Rename</button>
+      </form>
+    </details>
   </div>
 </div>
 {{if .DirectToBead}}<p>Direct to bead</p>{{end}}

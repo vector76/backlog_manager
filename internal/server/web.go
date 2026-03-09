@@ -566,6 +566,37 @@ func handleWebReopen(st Store, hub *NotifyHub) http.HandlerFunc {
 	}
 }
 
+// handleWebRenameFeature handles POST /project/{name}/feature/{id}/rename.
+// Updates the feature name and redirects back to the feature page.
+func handleWebRenameFeature(st Store, hub *NotifyHub) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		projectName := chi.URLParam(r, "name")
+		featureID := chi.URLParam(r, "id")
+		featurePage := "/project/" + projectName + "/feature/" + featureID
+		if err := r.ParseForm(); err != nil {
+			http.Redirect(w, r, featurePage, http.StatusFound)
+			return
+		}
+		name := r.FormValue("name")
+		if name == "" {
+			http.Redirect(w, r, featurePage, http.StatusFound)
+			return
+		}
+		f, err := st.GetFeature(projectName, featureID)
+		if err != nil {
+			http.Redirect(w, r, featurePage, http.StatusFound)
+			return
+		}
+		f.Name = name
+		if err := st.UpdateFeature(f); err != nil {
+			http.Redirect(w, r, featurePage, http.StatusFound)
+			return
+		}
+		hub.NotifyFeature(projectName + ":" + featureID)
+		http.Redirect(w, r, featurePage, http.StatusFound)
+	}
+}
+
 // handleWebDeleteDraftFeature handles POST /project/{name}/feature/{id}/delete.
 // Hard-deletes a draft feature and redirects to the dashboard.
 // Non-draft features are rejected with a redirect back to the feature page.
