@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/vector76/backlog_manager/internal/model"
 )
@@ -792,5 +793,196 @@ func TestWebLoginAlreadyLoggedIn(t *testing.T) {
 	w := webRequest(t, srv, "GET", "/login", "", cookie)
 	if w.Code != http.StatusFound {
 		t.Errorf("expected redirect for already-logged-in user, got %d", w.Code)
+	}
+}
+
+// TestWebDashboardActiveBeforeTerminal checks that active features appear before terminal ones.
+func TestWebDashboardActiveBeforeTerminal(t *testing.T) {
+	srv, st := newTestServer(t)
+	cookie := loginWeb(t, srv)
+
+	_, err := st.CreateProject("order-test", "tok-order")
+	if err != nil {
+		t.Fatal(err)
+	}
+	termFeat, err := st.CreateFeature("order-test", "terminal-feat", "Description.")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.TransitionStatus("order-test", termFeat.ID, model.StatusAbandoned); err != nil {
+		t.Fatal(err)
+	}
+	_, err = st.CreateFeature("order-test", "active-feat", "Description.")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	w := webRequest(t, srv, "GET", "/", "", cookie)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	body := w.Body.String()
+	if strings.Index(body, "active-feat") >= strings.Index(body, "terminal-feat") {
+		t.Errorf("expected active-feat to appear before terminal-feat in dashboard")
+	}
+}
+
+// TestWebDashboardCreatedAtSortActiveFeatures checks that newer active features appear before older ones.
+func TestWebDashboardCreatedAtSortActiveFeatures(t *testing.T) {
+	srv, st := newTestServer(t)
+	cookie := loginWeb(t, srv)
+
+	_, err := st.CreateProject("sort-active", "tok-sort-active")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = st.CreateFeature("sort-active", "older-active", "Description.")
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(time.Millisecond)
+	_, err = st.CreateFeature("sort-active", "newer-active", "Description.")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	w := webRequest(t, srv, "GET", "/", "", cookie)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	body := w.Body.String()
+	if strings.Index(body, "newer-active") >= strings.Index(body, "older-active") {
+		t.Errorf("expected newer-active to appear before older-active in dashboard")
+	}
+}
+
+// TestWebDashboardCreatedAtSortTerminalFeatures checks that newer terminal features appear before older ones.
+func TestWebDashboardCreatedAtSortTerminalFeatures(t *testing.T) {
+	srv, st := newTestServer(t)
+	cookie := loginWeb(t, srv)
+
+	_, err := st.CreateProject("sort-terminal", "tok-sort-terminal")
+	if err != nil {
+		t.Fatal(err)
+	}
+	olderFeat, err := st.CreateFeature("sort-terminal", "older-abandoned", "Description.")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.TransitionStatus("sort-terminal", olderFeat.ID, model.StatusAbandoned); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(time.Millisecond)
+	newerFeat, err := st.CreateFeature("sort-terminal", "newer-abandoned", "Description.")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.TransitionStatus("sort-terminal", newerFeat.ID, model.StatusAbandoned); err != nil {
+		t.Fatal(err)
+	}
+
+	w := webRequest(t, srv, "GET", "/", "", cookie)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	body := w.Body.String()
+	if strings.Index(body, "newer-abandoned") >= strings.Index(body, "older-abandoned") {
+		t.Errorf("expected newer-abandoned to appear before older-abandoned in dashboard")
+	}
+}
+
+// TestWebDashboardTerminalOnlyNoEmptyState checks that terminal-only projects don't show empty state.
+func TestWebDashboardTerminalOnlyNoEmptyState(t *testing.T) {
+	srv, st := newTestServer(t)
+	cookie := loginWeb(t, srv)
+
+	_, err := st.CreateProject("terminal-only", "tok-terminal-only")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := st.CreateFeature("terminal-only", "sole-feature", "Description.")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.TransitionStatus("terminal-only", f.ID, model.StatusAbandoned); err != nil {
+		t.Fatal(err)
+	}
+
+	w := webRequest(t, srv, "GET", "/", "", cookie)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, "sole-feature") {
+		t.Errorf("expected sole-feature in dashboard body")
+	}
+	if strings.Contains(body, "No features yet") {
+		t.Errorf("expected no empty-state message when terminal features exist")
+	}
+}
+
+// TestWebDashboardNoStatusGroupTitle checks that the dashboard does not render status-group headers.
+func TestWebDashboardNoStatusGroupTitle(t *testing.T) {
+	srv, st := newTestServer(t)
+	cookie := loginWeb(t, srv)
+
+	_, err := st.CreateProject("no-groups", "tok-no-groups")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = st.CreateFeature("no-groups", "A Feature", "Description.")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	w := webRequest(t, srv, "GET", "/", "", cookie)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	body := w.Body.String()
+	if strings.Contains(body, "status-group-title") {
+		t.Errorf("expected no status-group-title class in dashboard body")
+	}
+	if strings.Contains(body, "status-group") {
+		t.Errorf("expected no status-group class in dashboard body")
+	}
+}
+
+// TestWebDashboardBeadInfoPreserved checks that a BeadsCreated feature appears in the dashboard table.
+func TestWebDashboardBeadInfoPreserved(t *testing.T) {
+	srv, st := newTestServer(t)
+	cookie := loginWeb(t, srv)
+
+	_, err := st.CreateProject("bead-info-test", "tok-bead-info")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := st.CreateFeature("bead-info-test", "Bead Feature", "Description.")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.TransitionStatus("bead-info-test", f.ID, model.StatusAwaitingClient); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.TransitionStatus("bead-info-test", f.ID, model.StatusFullySpecified); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.TransitionStatus("bead-info-test", f.ID, model.StatusReadyToGenerate); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.TransitionStatus("bead-info-test", f.ID, model.StatusGenerating); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.TransitionStatus("bead-info-test", f.ID, model.StatusBeadsCreated); err != nil {
+		t.Fatal(err)
+	}
+
+	w := webRequest(t, srv, "GET", "/", "", cookie)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, "Bead Feature") {
+		t.Errorf("expected Bead Feature in dashboard body")
 	}
 }
