@@ -1,6 +1,7 @@
 package server_test
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -211,6 +212,12 @@ type errClient struct{ err error }
 
 func (e *errClient) GetStatuses(_ []string) (map[string]string, error) {
 	return nil, e.err
+}
+
+func (e *errClient) SubscribeSSE(_ context.Context) <-chan struct{} {
+	ch := make(chan struct{})
+	close(ch)
+	return ch
 }
 
 func TestBeadMonitor_poll_clientError_doesNotCrash(t *testing.T) {

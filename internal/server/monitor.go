@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"log"
 	"sync"
 	"time"
@@ -11,6 +12,12 @@ import (
 // BeadsClient is the interface for querying bead statuses from the beads server.
 type BeadsClient interface {
 	GetStatuses(ids []string) (map[string]string, error)
+
+	// SubscribeSSE opens an SSE stream and returns a receive-only channel.
+	// One send occurs per "data:" line received from the server.
+	// The channel is closed when the connection drops (EOF or error).
+	// The caller cancels the stream via the provided context.
+	SubscribeSSE(ctx context.Context) <-chan struct{}
 }
 
 // BeadProgress holds the aggregated bead completion progress for a feature.
