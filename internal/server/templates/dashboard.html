@@ -4,9 +4,10 @@
 <div data-live-page="dashboard" class="flex-row" style="margin-bottom:1rem">
   <h1 style="margin-bottom:0">Projects</h1>
   <span class="spacer"></span>
-  <button class="btn btn-primary btn-sm" id="add-project-btn">+ Add Project</button>
+  {{if not .IsViewer}}<button class="btn btn-primary btn-sm" id="add-project-btn">+ Add Project</button>{{end}}
 </div>
 
+{{if not .IsViewer}}
 <div class="card add-project-form" id="add-project-form">
   <h2>Create Project</h2>
   <form method="POST" action="/projects">
@@ -20,6 +21,7 @@
     </div>
   </form>
 </div>
+{{end}}
 
 {{if .NewProject}}
 <div class="alert alert-success">
@@ -46,7 +48,7 @@
         <span class="connectivity muted" style="margin-left:0.5rem">○ Never connected</span>
       {{end}}
       <span class="spacer"></span>
-      <a class="btn btn-secondary btn-sm" href="/project/{{.Name}}/new" onclick="event.stopPropagation()">+ New Feature</a>
+      {{if not $.IsViewer}}<a class="btn btn-secondary btn-sm" href="/project/{{.Name}}/new" onclick="event.stopPropagation()">+ New Feature</a>{{end}}
     </summary>
     <div class="project-body">
       {{if .Features}}

@@ -6,6 +6,7 @@
     <h1 style="margin-bottom:0.25rem">{{.Feature.Name}}</h1>
     <span class="badge {{statusBadgeClass .Feature.Status}}">{{statusLabel .Feature.Status}}</span>
     <span class="muted" style="font-size:0.85rem;margin-left:0.5rem">updated {{.Feature.UpdatedAt}}</span>
+    {{if not .IsViewer}}
     <details style="margin-top:0.5rem">
       <summary style="cursor:pointer;font-size:0.9rem">Edit title</summary>
       <form method="post" action="/project/{{.ProjectName}}/feature/{{.Feature.ID}}/rename" style="margin-top:0.5rem;display:flex;gap:0.5rem">
@@ -13,6 +14,7 @@
         <button type="submit" class="btn">Rename</button>
       </form>
     </details>
+    {{end}}
   </div>
 </div>
 {{if .DirectToBead}}<p>Direct to bead</p>{{end}}
@@ -24,6 +26,7 @@
 
 <div id="action-section">
 {{if eq .Feature.Status "draft"}}
+{{if not .IsViewer}}
 <div class="card">
   <h2>Actions</h2>
   <details style="margin-bottom:1rem">
@@ -43,6 +46,7 @@
   </form>
 </div>
 {{end}}
+{{end}}
 
 {{if eq .Feature.Status "awaiting_human"}}
 <div class="card">
@@ -53,6 +57,7 @@
     <div class="md-content">{{renderMarkdown .LatestQuestions}}</div>
   </div>
   {{end}}
+  {{if not .IsViewer}}
   <form method="post" action="/project/{{.ProjectName}}/feature/{{.Feature.ID}}/respond">
     <div style="margin-bottom:0.75rem">
       <label for="response" style="font-weight:600;display:block;margin-bottom:0.25rem">Your Response</label>
@@ -68,6 +73,7 @@
       <button type="submit" class="btn btn-primary">Send Response</button>
     </div>
   </form>
+  {{end}}
 </div>
 {{end}}
 
@@ -78,6 +84,7 @@
 {{end}}
 
 {{if eq .Feature.Status "fully_specified"}}
+{{if not .IsViewer}}
 <div class="card">
   <h2>Actions</h2>
   <details style="margin-bottom:1rem">
@@ -107,6 +114,7 @@
     {{end}}
   </div>
 </div>
+{{end}}
 {{end}}
 
 {{if or (eq .Feature.Status "waiting") (eq .Feature.Status "ready_to_generate") (eq .Feature.Status "generating")}}

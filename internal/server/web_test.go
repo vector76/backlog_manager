@@ -1776,3 +1776,86 @@ func TestViewerBadgeAbsentForAdminSession(t *testing.T) {
 		t.Errorf("expected no 'View Only' badge in admin session dashboard")
 	}
 }
+
+// TestViewerDashboardHidesAddProject checks that the "Add Project" button is hidden for viewer sessions.
+func TestViewerDashboardHidesAddProject(t *testing.T) {
+	srv, _ := newTestServerWithViewer(t)
+	cookie := loginWebAsViewer(t, srv)
+	w := webRequest(t, srv, "GET", "/", "", cookie)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	if strings.Contains(w.Body.String(), "Add Project") {
+		t.Errorf("viewer dashboard should not contain 'Add Project'")
+	}
+}
+
+// TestAdminDashboardShowsAddProject checks that the "Add Project" button is visible for admin sessions.
+func TestAdminDashboardShowsAddProject(t *testing.T) {
+	srv, _ := newTestServerWithViewer(t)
+	cookie := loginWeb(t, srv)
+	w := webRequest(t, srv, "GET", "/", "", cookie)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "Add Project") {
+		t.Errorf("admin dashboard should contain 'Add Project'")
+	}
+}
+
+// TestViewerFeaturePageHidesActionControls checks that action controls are hidden for viewer sessions on the feature page.
+func TestViewerFeaturePageHidesActionControls(t *testing.T) {
+	srv, st := newTestServerWithViewer(t)
+
+	_, err := st.CreateProject("viewer-feat-project", "tok-viewer-feat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := st.CreateFeature("viewer-feat-project", "Viewer Feature", "Some description.", false, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cookie := loginWebAsViewer(t, srv)
+	w := webRequest(t, srv, "GET", "/project/viewer-feat-project/feature/"+f.ID, "", cookie)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	body := w.Body.String()
+	if strings.Contains(body, "Edit Description") {
+		t.Errorf("viewer feature page should not contain 'Edit Description'")
+	}
+	if strings.Contains(body, "Start Dialog") {
+		t.Errorf("viewer feature page should not contain 'Start Dialog'")
+	}
+	if strings.Contains(body, "Edit title") {
+		t.Errorf("viewer feature page should not contain 'Edit title'")
+	}
+}
+
+// TestAdminFeaturePageShowsActionControls checks that action controls are visible for admin sessions on the feature page.
+func TestAdminFeaturePageShowsActionControls(t *testing.T) {
+	srv, st := newTestServerWithViewer(t)
+
+	_, err := st.CreateProject("admin-feat-project", "tok-admin-feat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := st.CreateFeature("admin-feat-project", "Admin Feature", "Some description.", false, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cookie := loginWeb(t, srv)
+	w := webRequest(t, srv, "GET", "/project/admin-feat-project/feature/"+f.ID, "", cookie)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, "Edit Description") {
+		t.Errorf("admin feature page should contain 'Edit Description'")
+	}
+	if !strings.Contains(body, "Start Dialog") {
+		t.Errorf("admin feature page should contain 'Start Dialog'")
+	}
+}

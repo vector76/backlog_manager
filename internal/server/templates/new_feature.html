@@ -20,7 +20,7 @@
       </label>
     </div>
     <div class="flex-row">
-      <button type="submit" class="btn btn-primary">Create Feature</button>
+      {{if not .IsViewer}}<button type="submit" class="btn btn-primary">Create Feature</button>{{end}}
       <a href="/" class="btn btn-secondary">Cancel</a>
     </div>
   </form>
