@@ -35,6 +35,7 @@ type BeadMonitor struct {
 	store    Store
 	interval time.Duration
 	notify   func(projectName, featureID string)
+	stop     chan struct{}
 
 	mu    sync.RWMutex
 	cache map[string]BeadProgress // featureID -> progress
@@ -52,7 +53,13 @@ func NewBeadMonitor(client BeadsClient, st Store, interval time.Duration) *BeadM
 		store:    st,
 		interval: interval,
 		cache:    make(map[string]BeadProgress),
+		stop:     make(chan struct{}),
 	}
+}
+
+// Stop signals the monitor's background goroutine to exit.
+func (m *BeadMonitor) Stop() {
+	close(m.stop)
 }
 
 // Start begins polling in a background goroutine.
@@ -61,10 +68,62 @@ func (m *BeadMonitor) Start() {
 }
 
 func (m *BeadMonitor) run() {
-	ticker := time.NewTicker(m.interval)
-	defer ticker.Stop()
-	for range ticker.C {
-		m.Poll()
+	ctx, cancel := context.WithCancel(context.Background())
+	sseCh := m.client.SubscribeSSE(ctx)
+	m.Poll()
+
+	for {
+		// Mode A: SSE active — no ticker, event-driven polling.
+		sseActive := true
+		for sseActive {
+			select {
+			case _, ok := <-sseCh:
+				if !ok {
+					cancel()
+					sseActive = false
+				} else {
+					m.Poll()
+				}
+			case <-m.stop:
+				cancel()
+				return
+			}
+		}
+
+		// Mode B: SSE unavailable — periodic fallback with reconnect attempts.
+		ticker := time.NewTicker(m.interval)
+		inModeB := true
+		for inModeB {
+			select {
+			case <-ticker.C:
+				m.Poll()
+				reconnCtx, reconnCancel := context.WithCancel(context.Background())
+				ch := m.client.SubscribeSSE(reconnCtx)
+				select {
+				case _, ok := <-ch:
+					if !ok {
+						// SSE failed again — stay in Mode B.
+						reconnCancel()
+					} else {
+						// Event arrived — SSE is live, switch to Mode A.
+						ticker.Stop()
+						cancel = reconnCancel
+						sseCh = ch
+						inModeB = false
+					}
+				default:
+					// Channel open and empty — SSE is live, switch to Mode A.
+					ticker.Stop()
+					cancel = reconnCancel
+					sseCh = ch
+					inModeB = false
+				}
+			case <-m.stop:
+				ticker.Stop()
+				cancel()
+				return
+			}
+		}
 	}
 }
 
