@@ -1,7 +1,7 @@
 {{template "base" .}}
 {{define "title"}}{{.Feature.Name}} - {{.ProjectName}} - Backlog Manager{{end}}
 {{define "content"}}
-<div class="flex-row" style="margin-bottom:1rem">
+<div class="flex-row" data-live-page="feature" data-project="{{.ProjectName}}" data-feature-id="{{.Feature.ID}}" style="margin-bottom:1rem">
   <div>
     <h1 style="margin-bottom:0.25rem">{{.Feature.Name}}</h1>
     <span class="badge {{statusBadgeClass .Feature.Status}}">{{statusLabel .Feature.Status}}</span>
@@ -14,6 +14,7 @@
   <div class="md-content">{{renderMarkdown .CurrentDescription}}</div>
 </div>
 
+<div id="action-section">
 {{if eq .Feature.Status "draft"}}
 <div class="card">
   <h2>Actions</h2>
@@ -112,10 +113,10 @@
     <div class="muted" style="margin-bottom:0.75rem">Bead status unavailable</div>
     {{else}}
     <div style="margin-bottom:0.75rem">
-      <strong>{{.BeadProgress.Closed}}/{{.BeadProgress.Total}} beads closed</strong>
+      <strong id="bead-progress-label">{{.BeadProgress.Closed}}/{{.BeadProgress.Total}} beads closed</strong>
       <div style="background:var(--border);border-radius:4px;height:8px;margin-top:0.4rem;overflow:hidden">
         {{if gt .BeadProgress.Total 0}}
-        <div style="background:var(--accent,#4caf50);height:100%;width:{{beadPercent .BeadProgress.Closed .BeadProgress.Total}}%"></div>
+        <div id="bead-progress-fill" style="background:var(--accent,#4caf50);height:100%;width:{{beadPercent .BeadProgress.Closed .BeadProgress.Total}}%"></div>
         {{end}}
       </div>
     </div>
@@ -134,7 +135,9 @@
   <button type="button" class="btn" disabled>Halt</button>
 </div>
 {{end}}
+</div>
 
+<div id="dialog-rounds">
 {{if .Iterations}}
 <h2 style="margin-top:1.5rem">Dialog History</h2>
 {{range .Iterations}}
@@ -167,4 +170,5 @@
 </details>
 {{end}}
 {{end}}
+</div>
 {{end}}

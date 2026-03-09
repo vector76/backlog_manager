@@ -756,6 +756,85 @@ func TestWebFeatureWaitingStatus(t *testing.T) {
 	}
 }
 
+// TestWebFeatureDetailLivePageAttributes checks that the feature page exposes data attributes for JS live update.
+func TestWebFeatureDetailLivePageAttributes(t *testing.T) {
+	srv, st := newTestServer(t)
+	cookie := loginWeb(t, srv)
+
+	_, err := st.CreateProject("live-attr-project", "tok-live")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := st.CreateFeature("live-attr-project", "Live Feature", "Description.")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	w := webRequest(t, srv, "GET", "/project/live-attr-project/feature/"+f.ID, "", cookie)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, `data-live-page="feature"`) {
+		t.Errorf("expected data-live-page=\"feature\" attribute in feature page")
+	}
+	if !strings.Contains(body, `data-project="live-attr-project"`) {
+		t.Errorf("expected data-project attribute in feature page")
+	}
+	if !strings.Contains(body, `data-feature-id="`+f.ID+`"`) {
+		t.Errorf("expected data-feature-id attribute in feature page")
+	}
+}
+
+// TestWebFeatureDetailActionSectionContainer checks that the action-section div is present.
+func TestWebFeatureDetailActionSectionContainer(t *testing.T) {
+	srv, st := newTestServer(t)
+	cookie := loginWeb(t, srv)
+
+	_, err := st.CreateProject("action-sec-project", "tok-action")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := st.CreateFeature("action-sec-project", "Action Feature", "Description.")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	w := webRequest(t, srv, "GET", "/project/action-sec-project/feature/"+f.ID, "", cookie)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, `id="action-section"`) {
+		t.Errorf("expected id=\"action-section\" div in feature page")
+	}
+}
+
+// TestWebFeatureDetailDialogRoundsContainer checks that the dialog-rounds div is always present.
+func TestWebFeatureDetailDialogRoundsContainer(t *testing.T) {
+	srv, st := newTestServer(t)
+	cookie := loginWeb(t, srv)
+
+	_, err := st.CreateProject("rounds-project", "tok-rounds")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := st.CreateFeature("rounds-project", "Rounds Feature", "Description.")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// No iterations yet — container should still be present.
+	w := webRequest(t, srv, "GET", "/project/rounds-project/feature/"+f.ID, "", cookie)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, `id="dialog-rounds"`) {
+		t.Errorf("expected id=\"dialog-rounds\" div in feature page (even with no iterations)")
+	}
+}
+
 // TestWebStaticFiles checks that static assets are served.
 func TestWebStaticFiles(t *testing.T) {
 	srv, _ := newTestServer(t)
