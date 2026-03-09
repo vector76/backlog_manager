@@ -83,6 +83,7 @@ func TestHandleFeatureData(t *testing.T) {
 		t.Errorf("expected application/json content-type, got %q", ct)
 	}
 	var resp struct {
+		Name       string `json:"name"`
 		Status     string `json:"status"`
 		Iterations []any  `json:"iterations"`
 	}
@@ -91,6 +92,9 @@ func TestHandleFeatureData(t *testing.T) {
 	}
 	if resp.Status != "draft" {
 		t.Errorf("expected status 'draft', got %q", resp.Status)
+	}
+	if resp.Name != "feat1" {
+		t.Errorf("expected name 'feat1', got %q", resp.Name)
 	}
 }
 

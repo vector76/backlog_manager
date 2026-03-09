@@ -14,6 +14,7 @@ type dashboardDataResponse struct {
 }
 
 type featureDataResponse struct {
+	Name         string                     `json:"name"`
 	Status       string                     `json:"status"`
 	Iterations   []featureIterationPageData `json:"iterations"`
 	BeadProgress *beadProgressJSON          `json:"bead_progress,omitempty"`
@@ -106,6 +107,7 @@ func handleFeatureData(st Store, monitor *BeadMonitor) http.HandlerFunc {
 		}
 
 		resp := featureDataResponse{
+			Name:       data.Feature.Name,
 			Status:     data.Feature.Status,
 			Iterations: data.Iterations,
 		}

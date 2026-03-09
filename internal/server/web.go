@@ -577,7 +577,7 @@ func handleWebRenameFeature(st Store, hub *NotifyHub) http.HandlerFunc {
 			http.Redirect(w, r, featurePage, http.StatusFound)
 			return
 		}
-		name := r.FormValue("name")
+		name := strings.TrimSpace(r.FormValue("name"))
 		if name == "" {
 			http.Redirect(w, r, featurePage, http.StatusFound)
 			return

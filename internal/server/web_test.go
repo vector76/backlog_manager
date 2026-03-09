@@ -1492,3 +1492,36 @@ func TestWebRenameFeature_NonDraftStatus(t *testing.T) {
 		t.Errorf("expected updated name in response, got: %s", got.Body.String())
 	}
 }
+
+// TestWebRenameFeature_WhitespaceOnly checks that a whitespace-only name is rejected.
+func TestWebRenameFeature_WhitespaceOnly(t *testing.T) {
+	srv, st := newTestServer(t)
+	cookie := loginWeb(t, srv)
+
+	if _, err := st.CreateProject("rename-ws-project", "tok-rename-ws"); err != nil {
+		t.Fatal(err)
+	}
+	f, err := st.CreateFeature("rename-ws-project", "Original Name", "desc", false, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	featurePage := "/project/rename-ws-project/feature/" + f.ID
+	body := url.Values{"name": {"   "}}.Encode()
+	w := webRequest(t, srv, "POST", featurePage+"/rename", body, cookie)
+	if w.Code != http.StatusFound {
+		t.Fatalf("expected 302 redirect, got %d", w.Code)
+	}
+	if loc := w.Header().Get("Location"); loc != featurePage {
+		t.Errorf("expected redirect to feature page %s, got %s", featurePage, loc)
+	}
+
+	// Verify name was NOT changed.
+	got := doRequest(t, srv, "GET", "/api/v1/projects/rename-ws-project/features/"+f.ID, nil, basicAuth("admin", "secret"))
+	if got.Code != http.StatusOK {
+		t.Fatalf("expected 200 getting feature, got %d", got.Code)
+	}
+	if !strings.Contains(got.Body.String(), "Original Name") {
+		t.Errorf("expected original name in response, got: %s", got.Body.String())
+	}
+}

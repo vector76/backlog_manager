@@ -171,7 +171,10 @@
             '<div style="margin-top:0.5rem"><button type="submit" class="btn">Save Description</button></div>' +
             '</form></details>' +
             '<form method="post" action="' + base + '/start-dialog">' +
-            '<button type="submit" class="btn btn-primary">Start Dialog</button></form></div>';
+            '<button type="submit" class="btn btn-primary">Start Dialog</button></form>' +
+            '<form method="post" action="' + base + '/delete" style="margin-top:1rem">' +
+            '<button type="submit" class="btn btn-danger" onclick="return confirm(\'Permanently delete this draft feature? This cannot be undone.\')">Delete Draft</button></form>' +
+            '</div>';
         }
 
         if (s === 'awaiting_human') {
@@ -267,10 +270,14 @@
       }
 
       function patchFeature(data) {
-        // Update feature title
+        // Update feature title and rename form input
         var titleEl = livePage.querySelector('h1');
         if (titleEl && data.name) {
           titleEl.textContent = data.name;
+        }
+        var renameInput = livePage.querySelector('input[name="name"]');
+        if (renameInput && data.name && renameInput !== document.activeElement) {
+          renameInput.value = data.name;
         }
 
         // Update status badge
