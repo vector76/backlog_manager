@@ -90,20 +90,6 @@ type basePageData struct {
 	Breadcrumbs []breadcrumb
 }
 
-// statusOrder defines the display order for feature status groups.
-var statusOrder = []model.FeatureStatus{
-	model.StatusAwaitingHuman,
-	model.StatusAwaitingClient,
-	model.StatusDraft,
-	model.StatusFullySpecified,
-	model.StatusWaiting,
-	model.StatusReadyToGenerate,
-	model.StatusGenerating,
-	model.StatusBeadsCreated,
-	model.StatusDone,
-	model.StatusHalted,
-	model.StatusAbandoned,
-}
 
 // --- Login handlers ---
 
@@ -177,7 +163,7 @@ type projectDashData struct {
 	FeatureCount int              `json:"feature_count"`
 	Connectivity string           `json:"connectivity"`
 	JustCreated  bool             `json:"just_created"`
-	Groups       []featureGroupData `json:"groups"`
+	Features     []featureRowData `json:"features"`
 }
 
 type newProjectInfo struct {
@@ -191,6 +177,13 @@ type dashboardPageData struct {
 	NewProject *newProjectInfo
 }
 
+// terminalStatuses is the set of statuses considered terminal (complete/ended).
+var terminalStatuses = map[model.FeatureStatus]bool{
+	model.StatusDone:      true,
+	model.StatusHalted:    true,
+	model.StatusAbandoned: true,
+}
+
 // buildDashboardData assembles projectDashData for all projects.
 func buildDashboardData(st Store, monitor *BeadMonitor) []projectDashData {
 	projects := st.ListProjects()
@@ -199,8 +192,25 @@ func buildDashboardData(st Store, monitor *BeadMonitor) []projectDashData {
 		features, _ := st.ListFeatures(p.Name, nil)
 		lastPoll, _ := st.GetLastPollTime(p.Name)
 
-		byStatus := make(map[model.FeatureStatus][]featureRowData)
+		var active, terminal []model.Feature
 		for _, f := range features {
+			if terminalStatuses[f.Status] {
+				terminal = append(terminal, f)
+			} else {
+				active = append(active, f)
+			}
+		}
+
+		sort.Slice(active, func(i, j int) bool {
+			return active[i].CreatedAt.After(active[j].CreatedAt)
+		})
+		sort.Slice(terminal, func(i, j int) bool {
+			return terminal[i].CreatedAt.After(terminal[j].CreatedAt)
+		})
+
+		allFeatures := append(active, terminal...)
+		rows := make([]featureRowData, 0, len(allFeatures))
+		for _, f := range allFeatures {
 			row := featureRowData{
 				ID:        f.ID,
 				Name:      f.Name,
@@ -210,29 +220,14 @@ func buildDashboardData(st Store, monitor *BeadMonitor) []projectDashData {
 			if f.Status == model.StatusBeadsCreated && monitor != nil {
 				row.BeadInfo = beadInfoString(f.ID, monitor)
 			}
-			byStatus[f.Status] = append(byStatus[f.Status], row)
-		}
-
-		var groups []featureGroupData
-		for _, s := range statusOrder {
-			rows, ok := byStatus[s]
-			if !ok || len(rows) == 0 {
-				continue
-			}
-			sort.Slice(rows, func(i, j int) bool {
-				return rows[i].UpdatedAt > rows[j].UpdatedAt
-			})
-			groups = append(groups, featureGroupData{
-				Status:   s.String(),
-				Features: rows,
-			})
+			rows = append(rows, row)
 		}
 
 		dashProjects = append(dashProjects, projectDashData{
 			Name:         p.Name,
 			FeatureCount: len(features),
 			Connectivity: connectivityStatus(lastPoll),
-			Groups:       groups,
+			Features:     rows,
 		})
 	}
 	return dashProjects
@@ -301,11 +296,6 @@ type featureRowData struct {
 	Status    string `json:"status"`
 	UpdatedAt string `json:"updated_at"`
 	BeadInfo  string `json:"bead_info,omitempty"` // e.g. "3/7 beads closed" for beads_created features; empty otherwise
-}
-
-type featureGroupData struct {
-	Status   string           `json:"status"`
-	Features []featureRowData `json:"features"`
 }
 
 // beadInfoString returns a human-readable progress string for a feature's beads.

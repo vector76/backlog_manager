@@ -49,33 +49,28 @@
       <a class="btn btn-secondary btn-sm" href="/project/{{.Name}}/new" onclick="event.stopPropagation()">+ New Feature</a>
     </summary>
     <div class="project-body">
-      {{if .Groups}}
-      {{range .Groups}}
-      <div class="status-group">
-        <div class="status-group-title">{{statusLabel .Status}} ({{len .Features}})</div>
-        <table class="feature-table">
-          <thead>
-            <tr>
-              <th>Name</th>
-              <th>Status</th>
-              <th>Updated</th>
-            </tr>
-          </thead>
-          <tbody>
-            {{range .Features}}
-            <tr>
-              <td><a href="/project/{{$proj}}/feature/{{.ID}}">{{.Name}}</a></td>
-              <td>
-                <span class="badge {{statusBadgeClass .Status}}">{{statusLabel .Status}}</span>
-                {{if .BeadInfo}}<span class="muted" style="font-size:0.8rem;margin-left:0.4rem">{{.BeadInfo}}</span>{{end}}
-              </td>
-              <td class="muted" style="font-size:0.85rem;white-space:nowrap">{{.UpdatedAt}}</td>
-            </tr>
-            {{end}}
-          </tbody>
-        </table>
-      </div>
-      {{end}}
+      {{if .Features}}
+      <table class="feature-table">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Status</th>
+            <th>Updated</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{range .Features}}
+          <tr>
+            <td><a href="/project/{{$proj}}/feature/{{.ID}}">{{.Name}}</a></td>
+            <td>
+              <span class="badge {{statusBadgeClass .Status}}">{{statusLabel .Status}}</span>
+              {{if .BeadInfo}}<span class="muted" style="font-size:0.8rem;margin-left:0.4rem">{{.BeadInfo}}</span>{{end}}
+            </td>
+            <td class="muted" style="font-size:0.85rem;white-space:nowrap">{{.UpdatedAt}}</td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
       {{else}}
       <p class="muted">No features yet. <a href="/project/{{.Name}}/new">Create one</a>.</p>
       {{end}}
