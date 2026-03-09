@@ -138,6 +138,7 @@ func New(cfg *config.Config, st Store, monitors ...*BeadMonitor) (*http.Server, 
 		r.Post("/project/{name}/feature/{id}/reopen", handleWebReopen(st, hub))
 		r.Post("/project/{name}/feature/{id}/generate-now", handleWebGenerateNow(st, hub))
 		r.Post("/project/{name}/feature/{id}/generate-after", handleWebGenerateAfter(st, hub))
+		r.Post("/project/{name}/feature/{id}/delete", handleWebDeleteDraftFeature(st))
 		r.Get("/events", handleDashboardSSE(hub))
 		r.Get("/data", handleDashboardData(st, monitor))
 		r.Get("/project/{name}/feature/{id}/events", handleFeatureSSE(hub))

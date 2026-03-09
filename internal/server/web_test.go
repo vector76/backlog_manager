@@ -1326,3 +1326,65 @@ func TestWebFeatureDetailGenerateAfterDropdown_NoEligibleFeatures(t *testing.T) 
 		t.Errorf("expected generate-after form to be absent when no eligible siblings exist")
 	}
 }
+
+// TestWebDeleteDraftFeature checks that a draft feature can be deleted via the web route.
+func TestWebDeleteDraftFeature(t *testing.T) {
+	srv, st := newTestServer(t)
+	cookie := loginWeb(t, srv)
+
+	if _, err := st.CreateProject("del-draft-project", "tok-del-draft"); err != nil {
+		t.Fatal(err)
+	}
+	f, err := st.CreateFeature("del-draft-project", "Draft To Delete", "desc", false, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	w := webRequest(t, srv, "POST", "/project/del-draft-project/feature/"+f.ID+"/delete", "", cookie)
+	if w.Code != http.StatusFound {
+		t.Fatalf("expected 302 redirect, got %d", w.Code)
+	}
+	if loc := w.Header().Get("Location"); loc != "/" {
+		t.Errorf("expected redirect to /, got %s", loc)
+	}
+
+	// Feature should no longer exist.
+	got := doRequest(t, srv, "GET", "/api/v1/projects/del-draft-project/features/"+f.ID, nil, basicAuth("admin", "secret"))
+	if got.Code != http.StatusNotFound {
+		t.Errorf("expected 404 after delete, got %d", got.Code)
+	}
+}
+
+// TestWebDeleteNonDraftFeature_Rejected checks that deleting a non-draft feature is rejected.
+func TestWebDeleteNonDraftFeature_Rejected(t *testing.T) {
+	srv, st := newTestServer(t)
+	cookie := loginWeb(t, srv)
+
+	if _, err := st.CreateProject("del-nondraft-project", "tok-del-nondraft"); err != nil {
+		t.Fatal(err)
+	}
+	f, err := st.CreateFeature("del-nondraft-project", "Non-Draft Feature", "desc", false, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Transition out of draft.
+	if err := st.StartDialog("del-nondraft-project", f.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	featurePage := "/project/del-nondraft-project/feature/" + f.ID
+	w := webRequest(t, srv, "POST", featurePage+"/delete", "", cookie)
+	if w.Code != http.StatusFound {
+		t.Fatalf("expected 302 redirect, got %d", w.Code)
+	}
+	if loc := w.Header().Get("Location"); loc != featurePage {
+		t.Errorf("expected redirect back to feature page %s, got %s", featurePage, loc)
+	}
+
+	// Feature should still exist.
+	got := doRequest(t, srv, "GET", "/api/v1/projects/del-nondraft-project/features/"+f.ID, nil, basicAuth("admin", "secret"))
+	if got.Code != http.StatusOK {
+		t.Errorf("expected feature to still exist (200), got %d", got.Code)
+	}
+}

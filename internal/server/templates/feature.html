@@ -31,6 +31,9 @@
   <form method="post" action="/project/{{.ProjectName}}/feature/{{.Feature.ID}}/start-dialog">
     <button type="submit" class="btn btn-primary">Start Dialog</button>
   </form>
+  <form method="post" action="/project/{{.ProjectName}}/feature/{{.Feature.ID}}/delete" style="margin-top:1rem">
+    <button type="submit" class="btn btn-danger" onclick="return confirm('Permanently delete this draft feature? This cannot be undone.')">Delete Draft</button>
+  </form>
 </div>
 {{end}}
 

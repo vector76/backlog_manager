@@ -566,6 +566,27 @@ func handleWebReopen(st Store, hub *NotifyHub) http.HandlerFunc {
 	}
 }
 
+// handleWebDeleteDraftFeature handles POST /project/{name}/feature/{id}/delete.
+// Hard-deletes a draft feature and redirects to the dashboard.
+// Non-draft features are rejected with a redirect back to the feature page.
+func handleWebDeleteDraftFeature(st Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		projectName := chi.URLParam(r, "name")
+		featureID := chi.URLParam(r, "id")
+		featurePage := "/project/" + projectName + "/feature/" + featureID
+		f, err := st.GetFeature(projectName, featureID)
+		if err != nil || f.Status != model.StatusDraft {
+			http.Redirect(w, r, featurePage, http.StatusFound)
+			return
+		}
+		if err := st.DeleteFeature(projectName, featureID); err != nil {
+			http.Redirect(w, r, featurePage, http.StatusFound)
+			return
+		}
+		http.Redirect(w, r, "/", http.StatusFound)
+	}
+}
+
 // handleWebGenerateNow handles POST /project/{name}/feature/{id}/generate-now.
 // Transitions a fully_specified feature to ready_to_generate and redirects back.
 func handleWebGenerateNow(st Store, hub *NotifyHub) http.HandlerFunc {
