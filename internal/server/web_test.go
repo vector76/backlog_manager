@@ -49,6 +49,23 @@ func loginWeb(t *testing.T, srv *http.Server) *http.Cookie {
 	return nil
 }
 
+// loginWebAsViewer performs a viewer login and returns the session cookie.
+func loginWebAsViewer(t *testing.T, srv *http.Server) *http.Cookie {
+	t.Helper()
+	body := url.Values{"username": {"viewer"}, "password": {"viewpass"}}.Encode()
+	w := webRequest(t, srv, "POST", "/login", body, nil)
+	if w.Code != http.StatusFound {
+		t.Fatalf("loginWebAsViewer: expected 302, got %d", w.Code)
+	}
+	for _, c := range w.Result().Cookies() {
+		if c.Name == "bm_session" {
+			return c
+		}
+	}
+	t.Fatal("loginWebAsViewer: no session cookie in response")
+	return nil
+}
+
 // TestWebLoginPage checks that the login page is accessible.
 func TestWebLoginPage(t *testing.T) {
 	srv, _ := newTestServer(t)
@@ -1523,5 +1540,92 @@ func TestWebRenameFeature_WhitespaceOnly(t *testing.T) {
 	}
 	if !strings.Contains(got.Body.String(), "Original Name") {
 		t.Errorf("expected original name in response, got: %s", got.Body.String())
+	}
+}
+
+// TestWebAdminLoginPreserved checks that admin credentials still work and produce a valid session.
+func TestWebAdminLoginPreserved(t *testing.T) {
+	srv, _ := newTestServerWithViewer(t)
+	cookie := loginWeb(t, srv)
+	if cookie == nil || cookie.Value == "" {
+		t.Fatal("expected non-empty session cookie for admin")
+	}
+	// Verify session grants dashboard access.
+	w := webRequest(t, srv, "GET", "/", "", cookie)
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200 for admin session, got %d", w.Code)
+	}
+}
+
+// TestWebViewerLoginSuccess checks that viewer credentials succeed and produce a valid session.
+func TestWebViewerLoginSuccess(t *testing.T) {
+	srv, _ := newTestServerWithViewer(t)
+	cookie := loginWebAsViewer(t, srv)
+	if cookie == nil || cookie.Value == "" {
+		t.Fatal("expected non-empty session cookie for viewer")
+	}
+	// Verify session grants dashboard access.
+	w := webRequest(t, srv, "GET", "/", "", cookie)
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200 for viewer session, got %d", w.Code)
+	}
+}
+
+// TestWebViewerCredentialsRejectedWhenNotConfigured checks that viewer credentials are rejected
+// when viewer config fields are empty.
+func TestWebViewerCredentialsRejectedWhenNotConfigured(t *testing.T) {
+	srv, _ := newTestServer(t) // no viewer credentials configured
+	body := url.Values{"username": {"viewer"}, "password": {"viewpass"}}.Encode()
+	w := webRequest(t, srv, "POST", "/login", body, nil)
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200 (re-render with error), got %d", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "invalid username or password") {
+		t.Errorf("expected error message, got: %s", w.Body.String())
+	}
+}
+
+// TestWebWrongCredentialsRejected checks that wrong credentials return the error message.
+func TestWebWrongCredentialsRejected(t *testing.T) {
+	srv, _ := newTestServerWithViewer(t)
+	body := url.Values{"username": {"admin"}, "password": {"wrong"}}.Encode()
+	w := webRequest(t, srv, "POST", "/login", body, nil)
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200 (re-render with error), got %d", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "invalid username or password") {
+		t.Errorf("expected error message, got: %s", w.Body.String())
+	}
+
+	body = url.Values{"username": {"viewer"}, "password": {"wrong"}}.Encode()
+	w = webRequest(t, srv, "POST", "/login", body, nil)
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200 (re-render with error), got %d", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "invalid username or password") {
+		t.Errorf("expected error message, got: %s", w.Body.String())
+	}
+}
+
+// TestWebViewerLogout checks that GET /logout clears a viewer session and redirects to /login.
+func TestWebViewerLogout(t *testing.T) {
+	srv, _ := newTestServerWithViewer(t)
+	cookie := loginWebAsViewer(t, srv)
+
+	w := webRequest(t, srv, "GET", "/logout", "", cookie)
+	if w.Code != http.StatusFound {
+		t.Errorf("expected 302 on logout, got %d", w.Code)
+	}
+	if loc := w.Header().Get("Location"); loc != "/login" {
+		t.Errorf("expected redirect to /login, got %s", loc)
+	}
+
+	// After logout, the old cookie should no longer grant access.
+	w = webRequest(t, srv, "GET", "/", "", cookie)
+	if w.Code != http.StatusFound {
+		t.Errorf("expected 302 redirect after logout, got %d", w.Code)
+	}
+	if loc := w.Header().Get("Location"); loc != "/login" {
+		t.Errorf("expected redirect to /login after logout, got %s", loc)
 	}
 }

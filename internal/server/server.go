@@ -121,7 +121,7 @@ func New(cfg *config.Config, st Store, monitors ...*BeadMonitor) (*http.Server, 
 	sessions := newSessionStore()
 	staticFS, _ := fs.Sub(webFS, "static")
 	r.Handle("/static/*", http.StripPrefix("/static", http.FileServer(http.FS(staticFS))))
-	loginHandler := handleWebLogin(sessions, cfg.DashboardUser, cfg.DashboardPassword)
+	loginHandler := handleWebLogin(sessions, cfg.DashboardUser, cfg.DashboardPassword, cfg.ViewerUser, cfg.ViewerPassword)
 	r.Get("/login", loginHandler)
 	r.Post("/login", loginHandler)
 	r.Get("/logout", handleWebLogout(sessions))

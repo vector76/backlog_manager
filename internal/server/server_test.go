@@ -29,6 +29,24 @@ func newTestServer(t *testing.T) (*http.Server, *store.Store) {
 	return srv, st
 }
 
+func newTestServerWithViewer(t *testing.T) (*http.Server, *store.Store) {
+	t.Helper()
+	st, err := store.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := &config.Config{
+		Port:              8080,
+		DataDir:           t.TempDir(),
+		DashboardUser:     "admin",
+		DashboardPassword: "secret",
+		ViewerUser:        "viewer",
+		ViewerPassword:    "viewpass",
+	}
+	srv, _ := server.New(cfg, st)
+	return srv, st
+}
+
 func doRequest(t *testing.T, srv *http.Server, method, path string, body any, headers map[string]string) *httptest.ResponseRecorder {
 	t.Helper()
 	var reqBody *bytes.Buffer

@@ -98,7 +98,7 @@ type loginPageData struct {
 	Error string
 }
 
-func handleWebLogin(sessions *sessionStore, dashUser, dashPass string) http.HandlerFunc {
+func handleWebLogin(sessions *sessionStore, dashUser, dashPass, viewerUser, viewerPass string) http.HandlerFunc {
 	tmpl := mustParseTemplate("login")
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
@@ -108,11 +108,16 @@ func handleWebLogin(sessions *sessionStore, dashUser, dashPass string) http.Hand
 			}
 			u := r.FormValue("username")
 			p := r.FormValue("password")
-			if u != dashUser || p != dashPass {
+			var role Role
+			if u == dashUser && p == dashPass {
+				role = RoleAdmin
+			} else if viewerUser != "" && viewerPass != "" && u == viewerUser && p == viewerPass {
+				role = RoleViewer
+			} else {
 				tmpl.Execute(w, loginPageData{Error: "invalid username or password"})
 				return
 			}
-			id, err := sessions.create(RoleAdmin)
+			id, err := sessions.create(role)
 			if err != nil {
 				tmpl.Execute(w, loginPageData{Error: "internal error"})
 				return
