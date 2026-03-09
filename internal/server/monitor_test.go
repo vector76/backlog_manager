@@ -185,6 +185,62 @@ func TestBeadMonitor_poll_allClosed_triggersDependencyResolution(t *testing.T) {
 	}
 }
 
+func TestBeadMonitor_poll_beadsCreated_doesNotUnblockDependent(t *testing.T) {
+	beadIDs := []string{"bd-e1"}
+	st, projName, featureID := newMonitorStore(t, beadIDs)
+
+	// Create a dependent feature in waiting state.
+	waitFeat, err := st.CreateFeature(projName, "Dependent Feature", "desc", false, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range []model.FeatureStatus{
+		model.StatusAwaitingClient,
+		model.StatusFullySpecified,
+	} {
+		if err := st.TransitionStatus(projName, waitFeat.ID, s); err != nil {
+			t.Fatalf("transition to %s: %v", s, err)
+		}
+	}
+	wf, err := st.GetFeature(projName, waitFeat.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wf.GenerateAfter = featureID
+	if err := st.UpdateFeature(wf); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.TransitionStatus(projName, waitFeat.ID, model.StatusWaiting); err != nil {
+		t.Fatal(err)
+	}
+
+	// Bead is still open (not closed), so provider should stay in beads_created.
+	srv := mockBeadsServer(t, map[string]string{"bd-e1": "open"})
+	defer srv.Close()
+
+	client := beadsserver.New(srv.URL)
+	monitor := server.NewBeadMonitor(client, st, time.Hour)
+	monitor.Poll()
+
+	// First feature must remain in beads_created.
+	f, err := st.GetFeature(projName, featureID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.Status != model.StatusBeadsCreated {
+		t.Errorf("first feature: want beads_created, got %s", f.Status)
+	}
+
+	// Dependent feature must remain in waiting.
+	dep, err := st.GetFeature(projName, waitFeat.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dep.Status != model.StatusWaiting {
+		t.Errorf("dependent feature: want waiting, got %s", dep.Status)
+	}
+}
+
 func TestBeadMonitor_poll_serverDown_gracefulDegradation(t *testing.T) {
 	beadIDs := []string{"bd-d1", "bd-d2"}
 	st, _, featureID := newMonitorStore(t, beadIDs)

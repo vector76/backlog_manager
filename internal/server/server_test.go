@@ -2026,6 +2026,59 @@ func TestHandleCreateFeature_NormalFeature_StillDraft(t *testing.T) {
 	}
 }
 
+func TestHandleBeadsDone_WaitingDependentStaysWaiting(t *testing.T) {
+	srv, st := newTestServer(t)
+
+	// Create provider feature A and advance to generating.
+	providerID := setupFeatureAtGenerating(t, srv, st, "bdwait")
+	token := tokenForProject(t, st, "bdwait")
+
+	// Create dependent feature B in the same project.
+	auth := basicAuth("admin", "secret")
+	w := doRequest(t, srv, "POST", "/api/v1/projects/bdwait/features",
+		map[string]any{"name": "waiter", "description": "desc"}, auth)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create waiter: %d", w.Code)
+	}
+	var waiterFeat map[string]any
+	json.NewDecoder(w.Body).Decode(&waiterFeat)
+	waiterID := waiterFeat["id"].(string)
+
+	// Advance B to fully_specified, set GenerateAfter = A, then transition to waiting.
+	if err := st.TransitionStatus("bdwait", waiterID, model.StatusAwaitingClient); err != nil {
+		t.Fatalf("transition waiter: %v", err)
+	}
+	if err := st.TransitionStatus("bdwait", waiterID, model.StatusFullySpecified); err != nil {
+		t.Fatalf("transition waiter: %v", err)
+	}
+	wf, err := st.GetFeature("bdwait", waiterID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wf.GenerateAfter = providerID
+	if err := st.UpdateFeature(wf); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.TransitionStatus("bdwait", waiterID, model.StatusWaiting); err != nil {
+		t.Fatalf("transition waiter to waiting: %v", err)
+	}
+
+	// POST beads-done for A (transitions A from generating → beads_created).
+	w = doRequest(t, srv, "POST", "/api/v1/features/"+providerID+"/beads-done", nil, bearerAuth(token))
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// B must still be waiting — beads_created must NOT trigger dependency resolution.
+	waiterUpdated, err := st.GetFeature("bdwait", waiterID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if waiterUpdated.Status != model.StatusWaiting {
+		t.Errorf("expected waiter to remain waiting after provider beads-done, got %v", waiterUpdated.Status)
+	}
+}
+
 func TestHandleCompleteFeature_WrongStatus(t *testing.T) {
 	srv, st := newTestServer(t)
 	featureID := setupFeatureAtFullySpecified(t, srv, st, "complete2")
