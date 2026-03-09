@@ -582,7 +582,7 @@ func TestUpdateFeature_DescriptionRejectedWhenNotDraft(t *testing.T) {
 	}
 }
 
-func TestAbandonFeature(t *testing.T) {
+func TestDeleteDraftFeature(t *testing.T) {
 	srv, _ := newTestServer(t)
 	auth := basicAuth("admin", "secret")
 	doRequest(t, srv, "POST", "/api/v1/projects", map[string]any{"name": "proj"}, auth)
@@ -596,8 +596,37 @@ func TestAbandonFeature(t *testing.T) {
 		t.Fatalf("expected 204, got %d: %s", w.Code, w.Body.String())
 	}
 
-	// Verify status is abandoned
+	// Verify feature is gone (hard-deleted)
 	dw := doRequest(t, srv, "GET", "/api/v1/projects/proj/features/"+id, nil, auth)
+	if dw.Code != http.StatusNotFound {
+		t.Errorf("expected 404 after hard-delete, got %d: %s", dw.Code, dw.Body.String())
+	}
+}
+
+func TestDeleteNonDraftFeature_SoftDelete(t *testing.T) {
+	srv, st := newTestServer(t)
+	auth := basicAuth("admin", "secret")
+	doRequest(t, srv, "POST", "/api/v1/projects", map[string]any{"name": "proj"}, auth)
+	cw := doRequest(t, srv, "POST", "/api/v1/projects/proj/features", map[string]any{"name": "feat"}, auth)
+	var created map[string]any
+	json.NewDecoder(cw.Body).Decode(&created)
+	id := created["id"].(string)
+
+	// Transition out of draft so the soft-delete path is taken
+	if err := st.StartDialog("proj", id); err != nil {
+		t.Fatalf("StartDialog: %v", err)
+	}
+
+	w := doRequest(t, srv, "DELETE", "/api/v1/projects/proj/features/"+id, nil, auth)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Verify feature is soft-deleted (status == abandoned, still exists)
+	dw := doRequest(t, srv, "GET", "/api/v1/projects/proj/features/"+id, nil, auth)
+	if dw.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", dw.Code, dw.Body.String())
+	}
 	var detail map[string]any
 	json.NewDecoder(dw.Body).Decode(&detail)
 	if detail["status"] != "abandoned" {

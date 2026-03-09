@@ -51,6 +51,7 @@ type Store interface {
 	ReadDescriptionVersion(projectName, featureID string, version int) (string, error)
 	ReadQuestions(projectName, featureID string, round int) (string, error)
 	ReadResponse(projectName, featureID string, round int) (string, error)
+	DeleteFeature(projectName, featureID string) error
 	TransitionStatus(projectName, featureID string, newStatus model.FeatureStatus) error
 	WriteArtifact(projectName, featureID, name, content string) error
 }
@@ -581,6 +582,14 @@ func handleAbandonFeature(st Store, hub *NotifyHub) http.HandlerFunc {
 			} else {
 				writeError(w, http.StatusInternalServerError, "internal error")
 			}
+			return
+		}
+		if f.Status == model.StatusDraft {
+			if err := st.DeleteFeature(projectName, featureID); err != nil {
+				writeError(w, http.StatusInternalServerError, "internal error")
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
 			return
 		}
 		f.Status = model.StatusAbandoned
