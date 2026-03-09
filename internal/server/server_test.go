@@ -25,7 +25,7 @@ func newTestServer(t *testing.T) (*http.Server, *store.Store) {
 		DashboardUser:     "admin",
 		DashboardPassword: "secret",
 	}
-	srv := server.New(cfg, st)
+	srv, _ := server.New(cfg, st)
 	return srv, st
 }
 

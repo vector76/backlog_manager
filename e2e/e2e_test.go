@@ -34,7 +34,7 @@ func newE2EServer(t *testing.T) *e2eServer {
 		DashboardUser:     "admin",
 		DashboardPassword: "secret",
 	}
-	httpSrv := server.New(cfg, st)
+	httpSrv, _ := server.New(cfg, st)
 	ts := httptest.NewServer(httpSrv.Handler)
 	t.Cleanup(ts.Close)
 	return &e2eServer{srv: ts, st: st}

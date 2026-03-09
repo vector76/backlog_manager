@@ -173,11 +173,11 @@ type statCount struct {
 }
 
 type projectDashData struct {
-	Name         string
-	FeatureCount int
-	Connectivity string
-	JustCreated  bool
-	Groups       []featureGroupData
+	Name         string           `json:"name"`
+	FeatureCount int              `json:"feature_count"`
+	Connectivity string           `json:"connectivity"`
+	JustCreated  bool             `json:"just_created"`
+	Groups       []featureGroupData `json:"groups"`
 }
 
 type newProjectInfo struct {
@@ -191,11 +191,56 @@ type dashboardPageData struct {
 	NewProject *newProjectInfo
 }
 
+// buildDashboardData assembles projectDashData for all projects.
+func buildDashboardData(st Store, monitor *BeadMonitor) []projectDashData {
+	projects := st.ListProjects()
+	dashProjects := make([]projectDashData, 0, len(projects))
+	for _, p := range projects {
+		features, _ := st.ListFeatures(p.Name, nil)
+		lastPoll, _ := st.GetLastPollTime(p.Name)
+
+		byStatus := make(map[model.FeatureStatus][]featureRowData)
+		for _, f := range features {
+			row := featureRowData{
+				ID:        f.ID,
+				Name:      f.Name,
+				Status:    f.Status.String(),
+				UpdatedAt: f.UpdatedAt.Format("2006-01-02 15:04"),
+			}
+			if f.Status == model.StatusBeadsCreated && monitor != nil {
+				row.BeadInfo = beadInfoString(f.ID, monitor)
+			}
+			byStatus[f.Status] = append(byStatus[f.Status], row)
+		}
+
+		var groups []featureGroupData
+		for _, s := range statusOrder {
+			rows, ok := byStatus[s]
+			if !ok || len(rows) == 0 {
+				continue
+			}
+			sort.Slice(rows, func(i, j int) bool {
+				return rows[i].UpdatedAt > rows[j].UpdatedAt
+			})
+			groups = append(groups, featureGroupData{
+				Status:   s.String(),
+				Features: rows,
+			})
+		}
+
+		dashProjects = append(dashProjects, projectDashData{
+			Name:         p.Name,
+			FeatureCount: len(features),
+			Connectivity: connectivityStatus(lastPoll),
+			Groups:       groups,
+		})
+	}
+	return dashProjects
+}
+
 func handleWebDashboard(st Store, monitor *BeadMonitor) http.HandlerFunc {
 	tmpl := mustParseTemplate("dashboard")
 	return func(w http.ResponseWriter, r *http.Request) {
-		projects := st.ListProjects()
-
 		// Check for newly created project in query params.
 		var newProj *newProjectInfo
 		if name := r.URL.Query().Get("created"); name != "" {
@@ -205,47 +250,15 @@ func handleWebDashboard(st Store, monitor *BeadMonitor) http.HandlerFunc {
 			}
 		}
 
-		dashProjects := make([]projectDashData, 0, len(projects))
-		for _, p := range projects {
-			features, _ := st.ListFeatures(p.Name, nil)
-			lastPoll, _ := st.GetLastPollTime(p.Name)
-
-			byStatus := make(map[model.FeatureStatus][]featureRowData)
-			for _, f := range features {
-				row := featureRowData{
-					ID:        f.ID,
-					Name:      f.Name,
-					Status:    f.Status.String(),
-					UpdatedAt: f.UpdatedAt.Format("2006-01-02 15:04"),
+		dashProjects := buildDashboardData(st, monitor)
+		// Mark the just-created project.
+		if newProj != nil {
+			for i := range dashProjects {
+				if dashProjects[i].Name == newProj.Name {
+					dashProjects[i].JustCreated = true
+					break
 				}
-				if f.Status == model.StatusBeadsCreated && monitor != nil {
-					row.BeadInfo = beadInfoString(f.ID, monitor)
-				}
-				byStatus[f.Status] = append(byStatus[f.Status], row)
 			}
-
-			var groups []featureGroupData
-			for _, s := range statusOrder {
-				rows, ok := byStatus[s]
-				if !ok || len(rows) == 0 {
-					continue
-				}
-				sort.Slice(rows, func(i, j int) bool {
-					return rows[i].UpdatedAt > rows[j].UpdatedAt
-				})
-				groups = append(groups, featureGroupData{
-					Status:   s.String(),
-					Features: rows,
-				})
-			}
-
-			dashProjects = append(dashProjects, projectDashData{
-				Name:         p.Name,
-				FeatureCount: len(features),
-				Connectivity: connectivityStatus(lastPoll),
-				JustCreated:  newProj != nil && p.Name == newProj.Name,
-				Groups:       groups,
-			})
 		}
 
 		tmpl.Execute(w, dashboardPageData{
@@ -283,16 +296,16 @@ func handleWebCreateProject(st Store) http.HandlerFunc {
 // --- Feature handlers ---
 
 type featureRowData struct {
-	ID        string
-	Name      string
-	Status    string
-	UpdatedAt string
-	BeadInfo  string // e.g. "3/7 beads closed" for beads_created features; empty otherwise
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Status    string `json:"status"`
+	UpdatedAt string `json:"updated_at"`
+	BeadInfo  string `json:"bead_info,omitempty"` // e.g. "3/7 beads closed" for beads_created features; empty otherwise
 }
 
 type featureGroupData struct {
-	Status   string
-	Features []featureRowData
+	Status   string           `json:"status"`
+	Features []featureRowData `json:"features"`
 }
 
 // beadInfoString returns a human-readable progress string for a feature's beads.
@@ -362,12 +375,12 @@ func handleWebCreateFeature(st Store) http.HandlerFunc {
 
 // featureIterationPageData holds data for one dialog iteration on the feature page.
 type featureIterationPageData struct {
-	Round       int
-	Description string
-	Questions   string
-	Response    string
-	IsFinal     bool
-	IsLast      bool
+	Round       int    `json:"round"`
+	Description string `json:"description"`
+	Questions   string `json:"questions"`
+	Response    string `json:"response"`
+	IsFinal     bool   `json:"is_final"`
+	IsLast      bool   `json:"is_last"`
 }
 
 type featureDetailPageData struct {
@@ -382,103 +395,109 @@ type featureDetailPageData struct {
 	BeadProgress       *BeadProgress // non-nil for beads_created features when monitor is available
 }
 
+// buildFeatureDetailData assembles featureDetailPageData for a single feature.
+func buildFeatureDetailData(st Store, monitor *BeadMonitor, projectName, featureID string) (*featureDetailPageData, error) {
+	detail, err := st.GetFeatureDetail(projectName, featureID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Build IsFinal map from feature metadata.
+	isFinalMap := make(map[int]bool)
+	for _, it := range detail.Feature.Iterations {
+		if it.IsFinal {
+			isFinalMap[it.Round] = true
+		}
+	}
+
+	// Build iteration page data with IsLast marked on the final element.
+	iterations := make([]featureIterationPageData, len(detail.Iterations))
+	for i, ic := range detail.Iterations {
+		iterations[i] = featureIterationPageData{
+			Round:       ic.Round,
+			Description: ic.Description,
+			Questions:   ic.Questions,
+			Response:    ic.Response,
+			IsFinal:     isFinalMap[ic.Round],
+			IsLast:      i == len(detail.Iterations)-1,
+		}
+	}
+
+	// Current description is the most recent non-empty iteration description, or the initial if none.
+	currentDesc := detail.InitialDescription
+	for i := len(detail.Iterations) - 1; i >= 0; i-- {
+		if d := detail.Iterations[i].Description; d != "" {
+			currentDesc = d
+			break
+		}
+	}
+
+	// Latest questions are shown prominently when awaiting human response.
+	var latestQuestions string
+	if detail.Status == model.StatusAwaitingHuman && len(detail.Iterations) > 0 {
+		latestQuestions = detail.Iterations[len(detail.Iterations)-1].Questions
+	}
+
+	// Build list of incomplete features for the Generate After dropdown.
+	var otherFeatures []featureRowData
+	if detail.Status == model.StatusFullySpecified {
+		if allFeatures, err := st.ListFeatures(projectName, nil); err == nil {
+			for _, f := range allFeatures {
+				if f.ID != featureID &&
+					f.Status != model.StatusDone &&
+					f.Status != model.StatusAbandoned &&
+					f.Status != model.StatusHalted {
+					otherFeatures = append(otherFeatures, featureRowData{
+						ID:     f.ID,
+						Name:   f.Name,
+						Status: f.Status.String(),
+					})
+				}
+			}
+		}
+	}
+
+	// Bead progress for features in beads_created status.
+	var beadProgress *BeadProgress
+	if detail.Status == model.StatusBeadsCreated && monitor != nil {
+		if p, ok := monitor.GetProgress(detail.ID); ok {
+			beadProgress = &p
+		}
+	}
+
+	return &featureDetailPageData{
+		basePageData: basePageData{Breadcrumbs: []breadcrumb{
+			{Label: "Dashboard", URL: "/"},
+			{Label: projectName},
+			{Label: detail.Name},
+		}},
+		ProjectName: projectName,
+		Feature: featureRowData{
+			ID:        detail.ID,
+			Name:      detail.Name,
+			Status:    detail.Status.String(),
+			UpdatedAt: detail.UpdatedAt.Format("2006-01-02 15:04"),
+		},
+		InitialDescription: detail.InitialDescription,
+		CurrentDescription: currentDesc,
+		LatestQuestions:    latestQuestions,
+		Iterations:         iterations,
+		OtherFeatures:      otherFeatures,
+		BeadProgress:       beadProgress,
+	}, nil
+}
+
 func handleWebFeature(st Store, monitor *BeadMonitor) http.HandlerFunc {
 	tmpl := mustParseTemplate("feature")
 	return func(w http.ResponseWriter, r *http.Request) {
 		projectName := chi.URLParam(r, "name")
 		featureID := chi.URLParam(r, "id")
-		detail, err := st.GetFeatureDetail(projectName, featureID)
+		data, err := buildFeatureDetailData(st, monitor, projectName, featureID)
 		if err != nil {
 			http.NotFound(w, r)
 			return
 		}
-
-		// Build IsFinal map from feature metadata.
-		isFinalMap := make(map[int]bool)
-		for _, it := range detail.Feature.Iterations {
-			if it.IsFinal {
-				isFinalMap[it.Round] = true
-			}
-		}
-
-		// Build iteration page data with IsLast marked on the final element.
-		iterations := make([]featureIterationPageData, len(detail.Iterations))
-		for i, ic := range detail.Iterations {
-			iterations[i] = featureIterationPageData{
-				Round:       ic.Round,
-				Description: ic.Description,
-				Questions:   ic.Questions,
-				Response:    ic.Response,
-				IsFinal:     isFinalMap[ic.Round],
-				IsLast:      i == len(detail.Iterations)-1,
-			}
-		}
-
-		// Current description is the most recent non-empty iteration description, or the initial if none.
-		// Searching backwards handles the case where a reopen creates a new iteration
-		// with no description yet (only a response file).
-		currentDesc := detail.InitialDescription
-		for i := len(detail.Iterations) - 1; i >= 0; i-- {
-			if d := detail.Iterations[i].Description; d != "" {
-				currentDesc = d
-				break
-			}
-		}
-
-		// Latest questions are shown prominently when awaiting human response.
-		var latestQuestions string
-		if detail.Status == model.StatusAwaitingHuman && len(detail.Iterations) > 0 {
-			latestQuestions = detail.Iterations[len(detail.Iterations)-1].Questions
-		}
-
-		// Build list of incomplete features for the Generate After dropdown.
-		// Only needed when the feature is fully_specified (the only state showing the dropdown).
-		var otherFeatures []featureRowData
-		if detail.Status == model.StatusFullySpecified {
-			if allFeatures, err := st.ListFeatures(projectName, nil); err == nil {
-				for _, f := range allFeatures {
-					if f.ID != featureID &&
-						f.Status != model.StatusDone &&
-						f.Status != model.StatusAbandoned &&
-						f.Status != model.StatusHalted {
-						otherFeatures = append(otherFeatures, featureRowData{
-							ID:     f.ID,
-							Name:   f.Name,
-							Status: f.Status.String(),
-						})
-					}
-				}
-			}
-		}
-
-		// Bead progress for features in beads_created status.
-		var beadProgress *BeadProgress
-		if detail.Status == model.StatusBeadsCreated && monitor != nil {
-			if p, ok := monitor.GetProgress(detail.ID); ok {
-				beadProgress = &p
-			}
-		}
-
-		tmpl.Execute(w, featureDetailPageData{
-			basePageData: basePageData{Breadcrumbs: []breadcrumb{
-				{Label: "Dashboard", URL: "/"},
-				{Label: projectName},
-				{Label: detail.Name},
-			}},
-			ProjectName: projectName,
-			Feature: featureRowData{
-				ID:        detail.ID,
-				Name:      detail.Name,
-				Status:    detail.Status.String(),
-				UpdatedAt: detail.UpdatedAt.Format("2006-01-02 15:04"),
-			},
-			InitialDescription: detail.InitialDescription,
-			CurrentDescription: currentDesc,
-			LatestQuestions:    latestQuestions,
-			Iterations:         iterations,
-			OtherFeatures:      otherFeatures,
-			BeadProgress:       beadProgress,
-		})
+		tmpl.Execute(w, data)
 	}
 }
 

@@ -61,11 +61,15 @@ const projectContextKey contextKey = "project"
 
 // New creates a new HTTP server with the given config and store.
 // An optional BeadMonitor may be provided to enable bead status polling.
-func New(cfg *config.Config, st Store, monitors ...*BeadMonitor) *http.Server {
+// Returns the HTTP server and the NotifyHub for broadcasting SSE events.
+func New(cfg *config.Config, st Store, monitors ...*BeadMonitor) (*http.Server, *NotifyHub) {
 	var monitor *BeadMonitor
 	if len(monitors) > 0 {
 		monitor = monitors[0]
 	}
+
+	hub := NewNotifyHub()
+	hub.Start(context.Background())
 
 	r := chi.NewRouter()
 	r.Use(middleware.Recoverer)
@@ -129,12 +133,16 @@ func New(cfg *config.Config, st Store, monitors ...*BeadMonitor) *http.Server {
 		r.Post("/project/{name}/feature/{id}/reopen", handleWebReopen(st))
 		r.Post("/project/{name}/feature/{id}/generate-now", handleWebGenerateNow(st))
 		r.Post("/project/{name}/feature/{id}/generate-after", handleWebGenerateAfter(st))
+		r.Get("/events", handleDashboardSSE(hub))
+		r.Get("/data", handleDashboardData(st, monitor))
+		r.Get("/project/{name}/feature/{id}/events", handleFeatureSSE(hub))
+		r.Get("/project/{name}/feature/{id}/data", handleFeatureData(st, monitor))
 	})
 
 	return &http.Server{
 		Addr:    fmt.Sprintf(":%d", cfg.Port),
 		Handler: r,
-	}
+	}, hub
 }
 
 // dashboardAuthMiddleware validates HTTP Basic Auth credentials.

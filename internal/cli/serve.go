@@ -41,7 +41,8 @@ func newServeCmd() *cobra.Command {
 				log.Printf("bead monitor started, polling %s every %s", cfg.BeadsServerURL, beadPollInterval)
 			}
 
-			srv := server.New(cfg, st, monitor)
+			srv, hub := server.New(cfg, st, monitor)
+			defer hub.Stop()
 			log.Printf("starting server on %s", srv.Addr)
 			if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
 				return err
