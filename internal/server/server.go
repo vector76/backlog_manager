@@ -127,29 +127,45 @@ func New(cfg *config.Config, st Store, monitors ...*BeadMonitor) (*http.Server, 
 	r.Get("/logout", handleWebLogout(sessions))
 	r.Group(func(r chi.Router) {
 		r.Use(webSessionMiddleware(sessions))
+		// Read-only routes accessible to all authenticated sessions (admin + viewer).
 		r.Get("/", handleWebDashboard(st, monitor))
-		r.Post("/projects", handleWebCreateProject(st))
 		r.Get("/project/{name}/new", handleWebNewFeature(st))
-		r.Post("/project/{name}/features", handleWebCreateFeature(st, hub))
 		r.Get("/project/{name}/feature/{id}", handleWebFeature(st, monitor))
-		r.Post("/project/{name}/feature/{id}/description", handleWebUpdateDescription(st, hub))
-		r.Post("/project/{name}/feature/{id}/start-dialog", handleWebStartDialog(st, hub))
-		r.Post("/project/{name}/feature/{id}/respond", handleWebRespond(st, hub))
-		r.Post("/project/{name}/feature/{id}/reopen", handleWebReopen(st, hub))
-		r.Post("/project/{name}/feature/{id}/generate-now", handleWebGenerateNow(st, hub))
-		r.Post("/project/{name}/feature/{id}/generate-after", handleWebGenerateAfter(st, hub))
-		r.Post("/project/{name}/feature/{id}/rename", handleWebRenameFeature(st, hub))
-		r.Post("/project/{name}/feature/{id}/delete", handleWebDeleteDraftFeature(st))
 		r.Get("/events", handleDashboardSSE(hub))
 		r.Get("/data", handleDashboardData(st, monitor))
 		r.Get("/project/{name}/feature/{id}/events", handleFeatureSSE(hub))
 		r.Get("/project/{name}/feature/{id}/data", handleFeatureData(st, monitor))
+		// Mutating routes restricted to admin sessions only.
+		r.Group(func(r chi.Router) {
+			r.Use(requireAdminMiddleware)
+			r.Post("/projects", handleWebCreateProject(st))
+			r.Post("/project/{name}/features", handleWebCreateFeature(st, hub))
+			r.Post("/project/{name}/feature/{id}/description", handleWebUpdateDescription(st, hub))
+			r.Post("/project/{name}/feature/{id}/start-dialog", handleWebStartDialog(st, hub))
+			r.Post("/project/{name}/feature/{id}/respond", handleWebRespond(st, hub))
+			r.Post("/project/{name}/feature/{id}/reopen", handleWebReopen(st, hub))
+			r.Post("/project/{name}/feature/{id}/generate-now", handleWebGenerateNow(st, hub))
+			r.Post("/project/{name}/feature/{id}/generate-after", handleWebGenerateAfter(st, hub))
+			r.Post("/project/{name}/feature/{id}/rename", handleWebRenameFeature(st, hub))
+			r.Post("/project/{name}/feature/{id}/delete", handleWebDeleteDraftFeature(st))
+		})
 	})
 
 	return &http.Server{
 		Addr:    fmt.Sprintf(":%d", cfg.Port),
 		Handler: r,
 	}, hub
+}
+
+// requireAdminMiddleware rejects viewer sessions with 403 Forbidden.
+func requireAdminMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if roleFromContext(r.Context()) == RoleViewer {
+			http.Error(w, "403 Forbidden", http.StatusForbidden)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // dashboardAuthMiddleware validates HTTP Basic Auth credentials.

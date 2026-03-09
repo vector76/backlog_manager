@@ -1629,3 +1629,124 @@ func TestWebViewerLogout(t *testing.T) {
 		t.Errorf("expected redirect to /login after logout, got %s", loc)
 	}
 }
+
+// TestViewerCanAccessReadOnlyRoutes checks that viewer sessions can access read-only routes.
+func TestViewerCanAccessReadOnlyRoutes(t *testing.T) {
+	srv, _ := newTestServerWithViewer(t)
+	cookie := loginWebAsViewer(t, srv)
+
+	// /events is a streaming SSE endpoint and is not suitable for httptest; test / and /data instead.
+	readOnlyPaths := []string{"/", "/data"}
+	for _, path := range readOnlyPaths {
+		w := webRequest(t, srv, "GET", path, "", cookie)
+		if w.Code != http.StatusOK {
+			t.Errorf("viewer GET %s: expected 200, got %d", path, w.Code)
+		}
+	}
+}
+
+// TestViewerBlockedFromMutatingRoutes checks that viewer sessions get 403 on all mutating POST routes.
+func TestViewerBlockedFromMutatingRoutes(t *testing.T) {
+	srv, st := newTestServerWithViewer(t)
+	cookie := loginWebAsViewer(t, srv)
+
+	_, err := st.CreateProject("viewer-block-project", "tok-viewer-block")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := st.CreateFeature("viewer-block-project", "Viewer Block Feature", "Desc.", false, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fid := f.ID
+	pname := "viewer-block-project"
+
+	mutatingRoutes := []struct {
+		method string
+		path   string
+		body   string
+	}{
+		{"POST", "/projects", "name=new-proj&token=tok-new"},
+		{"POST", "/project/" + pname + "/features", "name=feat&description=desc"},
+		{"POST", "/project/" + pname + "/feature/" + fid + "/description", "description=new"},
+		{"POST", "/project/" + pname + "/feature/" + fid + "/start-dialog", ""},
+		{"POST", "/project/" + pname + "/feature/" + fid + "/respond", "response=resp"},
+		{"POST", "/project/" + pname + "/feature/" + fid + "/reopen", "comment=c"},
+		{"POST", "/project/" + pname + "/feature/" + fid + "/generate-now", ""},
+		{"POST", "/project/" + pname + "/feature/" + fid + "/generate-after", ""},
+		{"POST", "/project/" + pname + "/feature/" + fid + "/rename", "name=newname"},
+		{"POST", "/project/" + pname + "/feature/" + fid + "/delete", ""},
+	}
+
+	for _, route := range mutatingRoutes {
+		w := webRequest(t, srv, route.method, route.path, route.body, cookie)
+		if w.Code != http.StatusForbidden {
+			t.Errorf("viewer %s %s: expected 403, got %d", route.method, route.path, w.Code)
+		}
+	}
+}
+
+// TestAdminNotBlockedFromMutatingRoutes checks that admin sessions are not blocked by requireAdminMiddleware.
+func TestAdminNotBlockedFromMutatingRoutes(t *testing.T) {
+	srv, st := newTestServerWithViewer(t)
+	cookie := loginWeb(t, srv)
+
+	_, err := st.CreateProject("admin-mutate-project", "tok-admin-mutate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := st.CreateFeature("admin-mutate-project", "Admin Mutate Feature", "Desc.", false, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Test a representative mutating route; admin should not get 403.
+	w := webRequest(t, srv, "POST", "/project/admin-mutate-project/feature/"+f.ID+"/description", "description=updated", cookie)
+	if w.Code == http.StatusForbidden {
+		t.Errorf("admin should not get 403 on mutating route, got 403")
+	}
+}
+
+// TestNoSessionBlockedFromMutatingRoutes checks that unauthenticated requests to mutating routes get 302.
+func TestNoSessionBlockedFromMutatingRoutes(t *testing.T) {
+	srv, st := newTestServer(t)
+
+	_, err := st.CreateProject("nosess-project", "tok-nosess")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := st.CreateFeature("nosess-project", "No Session Feature", "Desc.", false, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fid := f.ID
+	pname := "nosess-project"
+
+	mutatingRoutes := []struct {
+		path string
+		body string
+	}{
+		{"/projects", "name=new-proj&token=tok-new"},
+		{"/project/" + pname + "/features", "name=feat&description=desc"},
+		{"/project/" + pname + "/feature/" + fid + "/description", "description=new"},
+		{"/project/" + pname + "/feature/" + fid + "/start-dialog", ""},
+		{"/project/" + pname + "/feature/" + fid + "/respond", "response=resp"},
+		{"/project/" + pname + "/feature/" + fid + "/reopen", "comment=c"},
+		{"/project/" + pname + "/feature/" + fid + "/generate-now", ""},
+		{"/project/" + pname + "/feature/" + fid + "/generate-after", ""},
+		{"/project/" + pname + "/feature/" + fid + "/rename", "name=newname"},
+		{"/project/" + pname + "/feature/" + fid + "/delete", ""},
+	}
+
+	for _, route := range mutatingRoutes {
+		w := webRequest(t, srv, "POST", route.path, route.body, nil)
+		if w.Code != http.StatusFound {
+			t.Errorf("no session POST %s: expected 302 redirect, got %d", route.path, w.Code)
+		}
+		if loc := w.Header().Get("Location"); loc != "/login" {
+			t.Errorf("no session POST %s: expected redirect to /login, got %s", route.path, loc)
+		}
+	}
+}
