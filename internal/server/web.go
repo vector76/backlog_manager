@@ -349,11 +349,12 @@ func handleWebCreateFeature(st Store, hub *NotifyHub) http.HandlerFunc {
 		}
 		name := strings.TrimSpace(r.FormValue("name"))
 		description := r.FormValue("description")
+		directToBead := r.FormValue("direct_to_bead") != ""
 		if name == "" {
 			http.Redirect(w, r, "/project/"+projectName+"/new", http.StatusFound)
 			return
 		}
-		feat, err := st.CreateFeature(projectName, name, description)
+		feat, err := st.CreateFeature(projectName, name, description, directToBead, "")
 		if err != nil {
 			http.Redirect(w, r, "/", http.StatusFound)
 			return

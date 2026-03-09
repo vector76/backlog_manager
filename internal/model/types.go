@@ -20,8 +20,10 @@ type Feature struct {
 	CurrentIteration int           `json:"current_iteration"`
 	// Iterations holds per-round dialog metadata (e.g. is_final flag).
 	Iterations []DialogIteration `json:"iterations,omitempty"`
+	// DirectToBead skips the dialog phase and sets the initial status to ready_to_generate (or waiting).
+	DirectToBead bool `json:"direct_to_bead,omitempty"`
 	// GenerateAfter is the ID of a feature this one depends on (optional).
-	GenerateAfter string    `json:"generate_after,omitempty"`
+	GenerateAfter string `json:"generate_after,omitempty"`
 	BeadIDs       []string  `json:"bead_ids,omitempty"`
 	CreatedAt     time.Time `json:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at"`

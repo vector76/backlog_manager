@@ -25,7 +25,7 @@ func newMonitorStore(t *testing.T, beadIDs []string) (*store.Store, string, stri
 	if err != nil {
 		t.Fatal(err)
 	}
-	feat, err := st.CreateFeature(proj.Name, "My Feature", "description")
+	feat, err := st.CreateFeature(proj.Name, "My Feature", "description", false, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +134,7 @@ func TestBeadMonitor_poll_allClosed_triggersDependencyResolution(t *testing.T) {
 	st, projName, featureID := newMonitorStore(t, beadIDs)
 
 	// Create a second feature in waiting state that depends on the first.
-	waitFeat, err := st.CreateFeature(projName, "Dependent Feature", "desc")
+	waitFeat, err := st.CreateFeature(projName, "Dependent Feature", "desc", false, "")
 	if err != nil {
 		t.Fatal(err)
 	}

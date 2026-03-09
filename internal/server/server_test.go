@@ -300,6 +300,54 @@ func TestCreateFeature_MissingName(t *testing.T) {
 	}
 }
 
+func TestCreateFeature_DirectToBead(t *testing.T) {
+	srv, _ := newTestServer(t)
+	auth := basicAuth("admin", "secret")
+	doRequest(t, srv, "POST", "/api/v1/projects", map[string]any{"name": "proj"}, auth)
+
+	w := doRequest(t, srv, "POST", "/api/v1/projects/proj/features", map[string]any{
+		"name":          "Direct Feature",
+		"description":   "Goes straight to ready.",
+		"direct_to_bead": true,
+	}, auth)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp["status"] != "ready_to_generate" {
+		t.Errorf("expected status ready_to_generate, got %v", resp["status"])
+	}
+}
+
+func TestCreateFeature_DirectToBeadWithDependency(t *testing.T) {
+	srv, _ := newTestServer(t)
+	auth := basicAuth("admin", "secret")
+	doRequest(t, srv, "POST", "/api/v1/projects", map[string]any{"name": "proj"}, auth)
+
+	w := doRequest(t, srv, "POST", "/api/v1/projects/proj/features", map[string]any{
+		"name":           "Dependent Feature",
+		"description":    "Waits for another.",
+		"direct_to_bead":  true,
+		"generate_after": "some-other-id",
+	}, auth)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp["status"] != "waiting" {
+		t.Errorf("expected status waiting, got %v", resp["status"])
+	}
+	if resp["generate_after"] != "some-other-id" {
+		t.Errorf("expected generate_after some-other-id, got %v", resp["generate_after"])
+	}
+}
+
 func TestListProjectFeatures_Empty(t *testing.T) {
 	srv, _ := newTestServer(t)
 	auth := basicAuth("admin", "secret")
@@ -1665,7 +1713,7 @@ func TestHandleRegisterArtifact_UpdatesLastSeen(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateProject: %v", err)
 	}
-	f, err := st.CreateFeature("poll-project", "Poll Feature", "desc")
+	f, err := st.CreateFeature("poll-project", "Poll Feature", "desc", false, "")
 	if err != nil {
 		t.Fatalf("CreateFeature: %v", err)
 	}

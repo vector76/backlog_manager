@@ -36,7 +36,7 @@ type Store interface {
 	DeleteProject(name string) error
 	GetProjectByToken(token string) (*model.Project, error)
 	ListFeatures(projectName string, statusFilter *model.FeatureStatus) ([]model.Feature, error)
-	CreateFeature(projectName, featureName, description string) (*model.Feature, error)
+	CreateFeature(projectName, featureName, description string, directToBead bool, generateAfter string) (*model.Feature, error)
 	GetFeature(projectName, featureID string) (*model.Feature, error)
 	GetFeatureDetail(projectName, featureID string) (*model.FeatureDetail, error)
 	UpdateFeature(updated *model.Feature) error
@@ -346,8 +346,10 @@ func handleGetOwnProject(st Store) http.HandlerFunc {
 // --- Feature request/response types ---
 
 type createFeatureRequest struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
+	Name          string `json:"name"`
+	Description   string `json:"description"`
+	DirectToBead  bool   `json:"direct_to_bead"`
+	GenerateAfter string `json:"generate_after"`
 }
 
 type updateFeatureRequest struct {
@@ -456,7 +458,7 @@ func handleCreateFeature(st Store, hub *NotifyHub) http.HandlerFunc {
 			writeError(w, http.StatusBadRequest, "name is required")
 			return
 		}
-		f, err := st.CreateFeature(projectName, req.Name, req.Description)
+		f, err := st.CreateFeature(projectName, req.Name, req.Description, req.DirectToBead, req.GenerateAfter)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "internal error")
 			return

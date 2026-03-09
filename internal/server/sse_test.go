@@ -69,7 +69,7 @@ func TestHandleFeatureData(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f, err := st.CreateFeature("proj1", "feat1", "desc")
+	f, err := st.CreateFeature("proj1", "feat1", "desc", false, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +140,7 @@ func TestHandleFeatureSSE(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f, err := st.CreateFeature("proj1", "feat1", "desc")
+	f, err := st.CreateFeature("proj1", "feat1", "desc", false, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -300,7 +300,7 @@ func TestFeatureSSEReceivesEventOnStatusChange(t *testing.T) {
 	if _, err := st.CreateProject("proj", "tok1"); err != nil {
 		t.Fatal(err)
 	}
-	f, err := st.CreateFeature("proj", "feat1", "desc")
+	f, err := st.CreateFeature("proj", "feat1", "desc", false, "")
 	if err != nil {
 		t.Fatal(err)
 	}

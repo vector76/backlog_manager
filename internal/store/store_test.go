@@ -110,7 +110,7 @@ func TestCreateFeature(t *testing.T) {
 	if _, err := s.CreateProject("p", "tok"); err != nil {
 		t.Fatal(err)
 	}
-	f, err := s.CreateFeature("p", "My Feature", "Initial description")
+	f, err := s.CreateFeature("p", "My Feature", "Initial description", false, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,7 +130,7 @@ func TestCreateFeatureWritesDescriptionV0(t *testing.T) {
 	if _, err := s.CreateProject("p", "tok"); err != nil {
 		t.Fatal(err)
 	}
-	f, err := s.CreateFeature("p", "feat", "hello world")
+	f, err := s.CreateFeature("p", "feat", "hello world", false, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,8 +145,65 @@ func TestCreateFeatureWritesDescriptionV0(t *testing.T) {
 
 func TestCreateFeatureUnknownProject(t *testing.T) {
 	s := newTestStore(t)
-	if _, err := s.CreateFeature("nope", "f", "desc"); err == nil {
+	if _, err := s.CreateFeature("nope", "f", "desc", false, ""); err == nil {
 		t.Error("expected error for unknown project")
+	}
+}
+
+func TestCreateFeatureDirectToBeadReadyToGenerate(t *testing.T) {
+	s := newTestStore(t)
+	if _, err := s.CreateProject("p", "tok"); err != nil {
+		t.Fatal(err)
+	}
+	f, err := s.CreateFeature("p", "feat", "desc", true, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.Status != model.StatusReadyToGenerate {
+		t.Errorf("expected ready_to_generate, got %v", f.Status)
+	}
+	if !f.DirectToBead {
+		t.Error("expected DirectToBead=true")
+	}
+	if f.GenerateAfter != "" {
+		t.Errorf("expected empty GenerateAfter, got %q", f.GenerateAfter)
+	}
+}
+
+func TestCreateFeatureDirectToBeadWithDependency(t *testing.T) {
+	s := newTestStore(t)
+	if _, err := s.CreateProject("p", "tok"); err != nil {
+		t.Fatal(err)
+	}
+	f, err := s.CreateFeature("p", "feat", "desc", true, "dep-id")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.Status != model.StatusWaiting {
+		t.Errorf("expected waiting, got %v", f.Status)
+	}
+	if !f.DirectToBead {
+		t.Error("expected DirectToBead=true")
+	}
+	if f.GenerateAfter != "dep-id" {
+		t.Errorf("expected GenerateAfter=%q, got %q", "dep-id", f.GenerateAfter)
+	}
+}
+
+func TestCreateFeatureDirectToBeadFalseIgnoresGenerateAfter(t *testing.T) {
+	s := newTestStore(t)
+	if _, err := s.CreateProject("p", "tok"); err != nil {
+		t.Fatal(err)
+	}
+	f, err := s.CreateFeature("p", "feat", "desc", false, "some-id")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.Status != model.StatusDraft {
+		t.Errorf("expected draft, got %v", f.Status)
+	}
+	if f.GenerateAfter != "" {
+		t.Errorf("expected empty GenerateAfter, got %q", f.GenerateAfter)
 	}
 }
 
@@ -155,10 +212,10 @@ func TestListFeatures(t *testing.T) {
 	if _, err := s.CreateProject("p", "tok"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.CreateFeature("p", "f1", "d1"); err != nil {
+	if _, err := s.CreateFeature("p", "f1", "d1", false, ""); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.CreateFeature("p", "f2", "d2"); err != nil {
+	if _, err := s.CreateFeature("p", "f2", "d2", false, ""); err != nil {
 		t.Fatal(err)
 	}
 	features, err := s.ListFeatures("p", nil)
@@ -175,11 +232,11 @@ func TestListFeaturesWithStatusFilter(t *testing.T) {
 	if _, err := s.CreateProject("p", "tok"); err != nil {
 		t.Fatal(err)
 	}
-	f1, err := s.CreateFeature("p", "f1", "d1")
+	f1, err := s.CreateFeature("p", "f1", "d1", false, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.CreateFeature("p", "f2", "d2"); err != nil {
+	if _, err := s.CreateFeature("p", "f2", "d2", false, ""); err != nil {
 		t.Fatal(err)
 	}
 	// Transition f1 to awaiting_client
@@ -202,7 +259,7 @@ func TestGetFeature(t *testing.T) {
 	if _, err := s.CreateProject("p", "tok"); err != nil {
 		t.Fatal(err)
 	}
-	created, err := s.CreateFeature("p", "feat", "desc")
+	created, err := s.CreateFeature("p", "feat", "desc", false, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -230,7 +287,7 @@ func TestUpdateFeature(t *testing.T) {
 	if _, err := s.CreateProject("p", "tok"); err != nil {
 		t.Fatal(err)
 	}
-	f, err := s.CreateFeature("p", "feat", "desc")
+	f, err := s.CreateFeature("p", "feat", "desc", false, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -260,7 +317,7 @@ func TestDeleteFeature(t *testing.T) {
 	if _, err := s.CreateProject("p", "tok"); err != nil {
 		t.Fatal(err)
 	}
-	f, err := s.CreateFeature("p", "feat", "desc")
+	f, err := s.CreateFeature("p", "feat", "desc", false, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -287,7 +344,7 @@ func TestUpdateDescriptionV0_InDraft(t *testing.T) {
 	if _, err := s.CreateProject("p", "tok"); err != nil {
 		t.Fatal(err)
 	}
-	f, err := s.CreateFeature("p", "feat", "original")
+	f, err := s.CreateFeature("p", "feat", "original", false, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -308,7 +365,7 @@ func TestUpdateDescriptionV0_NotDraft(t *testing.T) {
 	if _, err := s.CreateProject("p", "tok"); err != nil {
 		t.Fatal(err)
 	}
-	f, err := s.CreateFeature("p", "feat", "original")
+	f, err := s.CreateFeature("p", "feat", "original", false, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -335,7 +392,7 @@ func TestWriteAndReadClientRound(t *testing.T) {
 	if _, err := s.CreateProject("p", "tok"); err != nil {
 		t.Fatal(err)
 	}
-	f, err := s.CreateFeature("p", "feat", "initial")
+	f, err := s.CreateFeature("p", "feat", "initial", false, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -366,7 +423,7 @@ func TestWriteAndReadHumanResponse(t *testing.T) {
 	if _, err := s.CreateProject("p", "tok"); err != nil {
 		t.Fatal(err)
 	}
-	f, err := s.CreateFeature("p", "feat", "initial")
+	f, err := s.CreateFeature("p", "feat", "initial", false, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -391,7 +448,7 @@ func TestWriteClientRoundInvalidRound(t *testing.T) {
 	if _, err := s.CreateProject("p", "tok"); err != nil {
 		t.Fatal(err)
 	}
-	f, err := s.CreateFeature("p", "feat", "desc")
+	f, err := s.CreateFeature("p", "feat", "desc", false, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -405,7 +462,7 @@ func TestWriteClientRoundUpdatesCurrentIteration(t *testing.T) {
 	if _, err := s.CreateProject("p", "tok"); err != nil {
 		t.Fatal(err)
 	}
-	f, err := s.CreateFeature("p", "feat", "desc")
+	f, err := s.CreateFeature("p", "feat", "desc", false, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -426,7 +483,7 @@ func TestGetFeatureDetail(t *testing.T) {
 	if _, err := s.CreateProject("p", "tok"); err != nil {
 		t.Fatal(err)
 	}
-	f, err := s.CreateFeature("p", "feat", "initial desc")
+	f, err := s.CreateFeature("p", "feat", "initial desc", false, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -467,7 +524,7 @@ func TestGetFeatureDetailMultipleRounds(t *testing.T) {
 	if _, err := s.CreateProject("p", "tok"); err != nil {
 		t.Fatal(err)
 	}
-	f, err := s.CreateFeature("p", "feat", "initial")
+	f, err := s.CreateFeature("p", "feat", "initial", false, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -523,7 +580,7 @@ func TestUnknownProjectErrors(t *testing.T) {
 	if _, err := s.CreateProject("p", "tok"); err != nil {
 		t.Fatal(err)
 	}
-	f, err := s.CreateFeature("p", "feat", "desc")
+	f, err := s.CreateFeature("p", "feat", "desc", false, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -563,7 +620,7 @@ func TestReadMissingFileReturnsEmpty(t *testing.T) {
 	if _, err := s.CreateProject("p", "tok"); err != nil {
 		t.Fatal(err)
 	}
-	f, err := s.CreateFeature("p", "feat", "desc")
+	f, err := s.CreateFeature("p", "feat", "desc", false, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -583,7 +640,7 @@ func TestWriteAndReadArtifact(t *testing.T) {
 	if _, err := s.CreateProject("p", "tok"); err != nil {
 		t.Fatal(err)
 	}
-	f, err := s.CreateFeature("p", "feat", "desc")
+	f, err := s.CreateFeature("p", "feat", "desc", false, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -655,7 +712,7 @@ func TestTransitionStatus(t *testing.T) {
 	if _, err := s.CreateProject("p", "tok"); err != nil {
 		t.Fatal(err)
 	}
-	f, err := s.CreateFeature("p", "feat", "desc")
+	f, err := s.CreateFeature("p", "feat", "desc", false, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -677,7 +734,7 @@ func TestWriteArtifact(t *testing.T) {
 	if _, err := s.CreateProject("p", "tok"); err != nil {
 		t.Fatal(err)
 	}
-	f, err := s.CreateFeature("p", "feat", "desc")
+	f, err := s.CreateFeature("p", "feat", "desc", false, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -698,7 +755,7 @@ func TestWriteArtifact_BeadsType(t *testing.T) {
 	if _, err := s.CreateProject("p", "tok"); err != nil {
 		t.Fatal(err)
 	}
-	f, err := s.CreateFeature("p", "feat", "desc")
+	f, err := s.CreateFeature("p", "feat", "desc", false, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -719,7 +776,7 @@ func TestTransitionStatus_GenerationPipeline(t *testing.T) {
 	if _, err := s.CreateProject("p", "tok"); err != nil {
 		t.Fatal(err)
 	}
-	f, err := s.CreateFeature("p", "feat", "desc")
+	f, err := s.CreateFeature("p", "feat", "desc", false, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -750,7 +807,7 @@ func TestTransitionStatus_WaitingPipeline(t *testing.T) {
 	if _, err := s.CreateProject("p", "tok"); err != nil {
 		t.Fatal(err)
 	}
-	f, err := s.CreateFeature("p", "feat", "desc")
+	f, err := s.CreateFeature("p", "feat", "desc", false, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -774,7 +831,7 @@ func TestTransitionStatusInvalid(t *testing.T) {
 	if _, err := s.CreateProject("p", "tok"); err != nil {
 		t.Fatal(err)
 	}
-	f, err := s.CreateFeature("p", "feat", "desc")
+	f, err := s.CreateFeature("p", "feat", "desc", false, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -803,7 +860,7 @@ func TestAbandonFromAnyStatus(t *testing.T) {
 		if _, err := s.CreateProject("p", "tok"); err != nil {
 			t.Fatal(err)
 		}
-		f, err := s.CreateFeature("p", "feat", "desc")
+		f, err := s.CreateFeature("p", "feat", "desc", false, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -867,7 +924,7 @@ func TestPersistenceFeatures(t *testing.T) {
 	if _, err := s1.CreateProject("proj", "tok"); err != nil {
 		t.Fatal(err)
 	}
-	f, err := s1.CreateFeature("proj", "my-feat", "initial desc")
+	f, err := s1.CreateFeature("proj", "my-feat", "initial desc", false, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -917,7 +974,7 @@ func TestConcurrentCreateFeatures(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			_, err := s.CreateFeature("p", "feat", "desc")
+			_, err := s.CreateFeature("p", "feat", "desc", false, "")
 			if err != nil {
 				errs <- err
 			}
@@ -953,7 +1010,7 @@ func TestConcurrentReadWrite(t *testing.T) {
 	if _, err := s.CreateProject("p", "tok"); err != nil {
 		t.Fatal(err)
 	}
-	f, err := s.CreateFeature("p", "feat", "desc")
+	f, err := s.CreateFeature("p", "feat", "desc", false, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -981,7 +1038,7 @@ func setupDialogFeature(t *testing.T, status model.FeatureStatus) (*Store, *mode
 	if _, err := s.CreateProject("p", "tok"); err != nil {
 		t.Fatal(err)
 	}
-	f, err := s.CreateFeature("p", "feat", "desc")
+	f, err := s.CreateFeature("p", "feat", "desc", false, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1235,7 +1292,7 @@ func TestRespondToDialogFinalPersistence(t *testing.T) {
 	if _, err := s1.CreateProject("p", "tok"); err != nil {
 		t.Fatal(err)
 	}
-	f, err := s1.CreateFeature("p", "feat", "desc")
+	f, err := s1.CreateFeature("p", "feat", "desc", false, "")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -309,7 +309,7 @@ func (s *Store) DeleteProject(name string) error {
 // --- Feature CRUD ---
 
 // CreateFeature creates a new feature in a project with an initial description.
-func (s *Store) CreateFeature(projectName, featureName, description string) (*model.Feature, error) {
+func (s *Store) CreateFeature(projectName, featureName, description string, directToBead bool, generateAfter string) (*model.Feature, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -329,12 +329,25 @@ func (s *Store) CreateFeature(projectName, featureName, description string) (*mo
 		return nil, fmt.Errorf("generate feature id: %w", err)
 	}
 
+	initialStatus := model.StatusDraft
+	var resolvedGenerateAfter string
+	if directToBead {
+		if generateAfter != "" {
+			initialStatus = model.StatusWaiting
+			resolvedGenerateAfter = generateAfter
+		} else {
+			initialStatus = model.StatusReadyToGenerate
+		}
+	}
+
 	now := time.Now().UTC()
 	f := model.Feature{
 		ID:               id,
 		Project:          projectName,
 		Name:             featureName,
-		Status:           model.StatusDraft,
+		Status:           initialStatus,
+		DirectToBead:     directToBead,
+		GenerateAfter:    resolvedGenerateAfter,
 		CurrentIteration: 0,
 		CreatedAt:        now,
 		UpdatedAt:        now,

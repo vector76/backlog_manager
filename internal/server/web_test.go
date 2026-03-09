@@ -145,7 +145,7 @@ func TestWebDashboardNoViewButton(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f, err := st.CreateFeature("view-btn-project", "My Feature Name", "Description.")
+	f, err := st.CreateFeature("view-btn-project", "My Feature Name", "Description.", false, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -334,7 +334,7 @@ func TestWebFeatureDetail(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f, err := st.CreateFeature("md-project", "MD Feature", "## Overview\n\nHello **world**.")
+	f, err := st.CreateFeature("md-project", "MD Feature", "## Overview\n\nHello **world**.", false, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -362,7 +362,7 @@ func TestWebFeatureDetailDraftActions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f, err := st.CreateFeature("act-project", "Draft Feature", "Initial description here.")
+	f, err := st.CreateFeature("act-project", "Draft Feature", "Initial description here.", false, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -392,7 +392,7 @@ func TestWebFeatureUpdateDescription(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f, err := st.CreateFeature("upd-project", "Upd Feature", "Old description.")
+	f, err := st.CreateFeature("upd-project", "Upd Feature", "Old description.", false, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -419,7 +419,7 @@ func TestWebFeatureStartDialog(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f, err := st.CreateFeature("dialog-project", "Dialog Feature", "Some description.")
+	f, err := st.CreateFeature("dialog-project", "Dialog Feature", "Some description.", false, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -448,7 +448,7 @@ func TestWebFeatureAwaitingHumanActions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f, err := st.CreateFeature("ah-project", "AH Feature", "Description.")
+	f, err := st.CreateFeature("ah-project", "AH Feature", "Description.", false, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -486,7 +486,7 @@ func TestWebFeatureRespond(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f, err := st.CreateFeature("resp-project", "Resp Feature", "Description.")
+	f, err := st.CreateFeature("resp-project", "Resp Feature", "Description.", false, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -522,7 +522,7 @@ func TestWebFeatureRespondFinal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f, err := st.CreateFeature("final-project", "Final Feature", "Description.")
+	f, err := st.CreateFeature("final-project", "Final Feature", "Description.", false, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -565,7 +565,7 @@ func TestWebFeatureFullySpecifiedActions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f, err := st.CreateFeature("fs-project", "FS Feature", "Description.")
+	f, err := st.CreateFeature("fs-project", "FS Feature", "Description.", false, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -607,7 +607,7 @@ func TestWebFeatureReopen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f, err := st.CreateFeature("reopen-project", "Reopen Feature", "Description.")
+	f, err := st.CreateFeature("reopen-project", "Reopen Feature", "Description.", false, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -651,7 +651,7 @@ func TestWebFeatureCurrentDescriptionAfterReopen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f, err := st.CreateFeature("reopen-desc-project", "Desc Feature", "Original description.")
+	f, err := st.CreateFeature("reopen-desc-project", "Desc Feature", "Original description.", false, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -698,7 +698,7 @@ func TestWebFeatureDialogHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f, err := st.CreateFeature("hist-project", "History Feature", "Initial.")
+	f, err := st.CreateFeature("hist-project", "History Feature", "Initial.", false, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -736,7 +736,7 @@ func TestWebFeatureWaitingStatus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f, err := st.CreateFeature("wait-project", "Wait Feature", "Description.")
+	f, err := st.CreateFeature("wait-project", "Wait Feature", "Description.", false, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -781,7 +781,7 @@ func TestWebFeatureDetailLivePageAttributes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f, err := st.CreateFeature("live-attr-project", "Live Feature", "Description.")
+	f, err := st.CreateFeature("live-attr-project", "Live Feature", "Description.", false, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -811,7 +811,7 @@ func TestWebFeatureDetailActionSectionContainer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f, err := st.CreateFeature("action-sec-project", "Action Feature", "Description.")
+	f, err := st.CreateFeature("action-sec-project", "Action Feature", "Description.", false, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -835,7 +835,7 @@ func TestWebFeatureDetailDialogRoundsContainer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f, err := st.CreateFeature("rounds-project", "Rounds Feature", "Description.")
+	f, err := st.CreateFeature("rounds-project", "Rounds Feature", "Description.", false, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -900,14 +900,14 @@ func TestWebDashboardActiveBeforeTerminal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	termFeat, err := st.CreateFeature("order-test", "terminal-feat", "Description.")
+	termFeat, err := st.CreateFeature("order-test", "terminal-feat", "Description.", false, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := st.TransitionStatus("order-test", termFeat.ID, model.StatusAbandoned); err != nil {
 		t.Fatal(err)
 	}
-	_, err = st.CreateFeature("order-test", "active-feat", "Description.")
+	_, err = st.CreateFeature("order-test", "active-feat", "Description.", false, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -931,12 +931,12 @@ func TestWebDashboardCreatedAtSortActiveFeatures(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = st.CreateFeature("sort-active", "older-active", "Description.")
+	_, err = st.CreateFeature("sort-active", "older-active", "Description.", false, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	time.Sleep(time.Millisecond)
-	_, err = st.CreateFeature("sort-active", "newer-active", "Description.")
+	_, err = st.CreateFeature("sort-active", "newer-active", "Description.", false, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -960,7 +960,7 @@ func TestWebDashboardCreatedAtSortTerminalFeatures(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	olderFeat, err := st.CreateFeature("sort-terminal", "older-abandoned", "Description.")
+	olderFeat, err := st.CreateFeature("sort-terminal", "older-abandoned", "Description.", false, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -968,7 +968,7 @@ func TestWebDashboardCreatedAtSortTerminalFeatures(t *testing.T) {
 		t.Fatal(err)
 	}
 	time.Sleep(time.Millisecond)
-	newerFeat, err := st.CreateFeature("sort-terminal", "newer-abandoned", "Description.")
+	newerFeat, err := st.CreateFeature("sort-terminal", "newer-abandoned", "Description.", false, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -995,7 +995,7 @@ func TestWebDashboardTerminalOnlyNoEmptyState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f, err := st.CreateFeature("terminal-only", "sole-feature", "Description.")
+	f, err := st.CreateFeature("terminal-only", "sole-feature", "Description.", false, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1025,7 +1025,7 @@ func TestWebDashboardNoStatusGroupTitle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = st.CreateFeature("no-groups", "A Feature", "Description.")
+	_, err = st.CreateFeature("no-groups", "A Feature", "Description.", false, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1052,7 +1052,7 @@ func TestWebDashboardBeadInfoPreserved(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f, err := st.CreateFeature("bead-info-test", "Bead Feature", "Description.")
+	f, err := st.CreateFeature("bead-info-test", "Bead Feature", "Description.", false, "")
 	if err != nil {
 		t.Fatal(err)
 	}
