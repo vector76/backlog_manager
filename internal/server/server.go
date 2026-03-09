@@ -364,6 +364,7 @@ type featureResponse struct {
 	Name             string   `json:"name"`
 	Status           string   `json:"status"`
 	CurrentIteration int      `json:"current_iteration"`
+	DirectToBead     bool     `json:"direct_to_bead,omitempty"`
 	GenerateAfter    string   `json:"generate_after,omitempty"`
 	BeadIDs          []string `json:"bead_ids,omitempty"`
 	CreatedAt        string   `json:"created_at"`
@@ -384,6 +385,7 @@ func toFeatureResponse(f model.Feature) featureResponse {
 		Name:             f.Name,
 		Status:           f.Status.String(),
 		CurrentIteration: f.CurrentIteration,
+		DirectToBead:     f.DirectToBead,
 		GenerateAfter:    f.GenerateAfter,
 		BeadIDs:          f.BeadIDs,
 		CreatedAt:        f.CreatedAt.Format("2006-01-02T15:04:05Z"),
@@ -737,9 +739,10 @@ func handleReopenDialog(st Store, hub *NotifyHub) http.HandlerFunc {
 
 // pollResponse is the response for GET /api/v1/poll.
 type pollResponse struct {
-	Action      string `json:"action"`
-	FeatureID   string `json:"feature_id"`
-	FeatureName string `json:"feature_name"`
+	Action       string `json:"action"`
+	FeatureID    string `json:"feature_id"`
+	FeatureName  string `json:"feature_name"`
+	DirectToBead bool   `json:"direct_to_bead,omitempty"`
 }
 
 // findActionableFeature returns the first feature in awaiting_client or ready_to_generate status.
@@ -788,11 +791,15 @@ func handlePoll(st Store, hub *NotifyHub) http.HandlerFunc {
 
 		for {
 			if feature, action, found := findActionableFeature(st, project.Name); found {
-				writeJSON(w, http.StatusOK, pollResponse{
+				resp := pollResponse{
 					Action:      action.String(),
 					FeatureID:   feature.ID,
 					FeatureName: feature.Name,
-				})
+				}
+				if action == model.ActionGenerate {
+					resp.DirectToBead = feature.DirectToBead
+				}
+				writeJSON(w, http.StatusOK, resp)
 				return
 			}
 
