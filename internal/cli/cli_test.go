@@ -10,8 +10,136 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
 	"github.com/vector76/backlog_manager/internal/cli"
 )
+
+func TestPollCmd_TimeoutFires(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/poll" {
+			http.NotFound(w, r)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer ts.Close()
+
+	os.Setenv("BM_URL", ts.URL)
+	os.Setenv("BM_TOKEN", "tok")
+	defer os.Unsetenv("BM_URL")
+	defer os.Unsetenv("BM_TOKEN")
+
+	var outBuf bytes.Buffer
+	root := cli.NewRootCmd()
+	root.SetArgs([]string{"poll", "--timeout", "1"})
+	root.SetOut(&outBuf)
+	err := root.Execute()
+	if err == nil {
+		t.Fatal("expected non-nil error when timeout fires")
+	}
+	var result map[string]any
+	if decErr := json.NewDecoder(&outBuf).Decode(&result); decErr != nil {
+		t.Fatalf("expected JSON output on timeout, got: %s (err: %v)", outBuf.String(), decErr)
+	}
+	if result["action"] != "timeout" {
+		t.Errorf("expected action=timeout, got %v", result["action"])
+	}
+}
+
+func TestPollCmd_TimeoutZeroDisables(t *testing.T) {
+	root := cli.NewRootCmd()
+	var found *cobra.Command
+	for _, c := range root.Commands() {
+		if c.Use == "poll" {
+			found = c
+			break
+		}
+	}
+	if found == nil {
+		t.Fatal("poll subcommand not found")
+	}
+	if err := found.Flags().Parse([]string{"--timeout", "0"}); err != nil {
+		t.Fatalf("expected --timeout 0 to parse without error: %v", err)
+	}
+	val, err := found.Flags().GetInt("timeout")
+	if err != nil {
+		t.Fatalf("expected timeout flag to exist: %v", err)
+	}
+	if val != 0 {
+		t.Errorf("expected timeout=0, got %d", val)
+	}
+}
+
+func TestPollCmd_DefaultTimeout(t *testing.T) {
+	root := cli.NewRootCmd()
+	var found *cobra.Command
+	for _, c := range root.Commands() {
+		if c.Use == "poll" {
+			found = c
+			break
+		}
+	}
+	if found == nil {
+		t.Fatal("poll subcommand not found")
+	}
+	flag := found.Flags().Lookup("timeout")
+	if flag == nil {
+		t.Fatal("expected --timeout flag to exist on poll command")
+	}
+	if flag.DefValue != "300" {
+		t.Errorf("expected default timeout=300, got %s", flag.DefValue)
+	}
+}
+
+func TestPollCmd_WorkFoundBeforeTimeout(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/poll" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"action": "do_something", "feature_id": "ft-abc"})
+	}))
+	defer ts.Close()
+
+	os.Setenv("BM_URL", ts.URL)
+	os.Setenv("BM_TOKEN", "tok")
+	defer os.Unsetenv("BM_URL")
+	defer os.Unsetenv("BM_TOKEN")
+
+	var outBuf bytes.Buffer
+	root := cli.NewRootCmd()
+	root.SetArgs([]string{"poll", "--timeout", "5"})
+	root.SetOut(&outBuf)
+	if err := root.Execute(); err != nil {
+		t.Fatalf("unexpected error when work found before timeout: %v", err)
+	}
+	var result map[string]any
+	if err := json.NewDecoder(&outBuf).Decode(&result); err != nil {
+		t.Fatalf("expected JSON output, got: %s (err: %v)", outBuf.String(), err)
+	}
+	if result["action"] != "do_something" {
+		t.Errorf("expected action=do_something, got %v", result["action"])
+	}
+}
+
+func TestPollCmd_HelpText(t *testing.T) {
+	var outBuf bytes.Buffer
+	root := cli.NewRootCmd()
+	root.SetArgs([]string{"poll", "--help"})
+	root.SetOut(&outBuf)
+	_ = root.Execute()
+	out := outBuf.String()
+	if !strings.Contains(out, "--timeout") {
+		t.Error("expected --timeout in help text")
+	}
+	if !strings.Contains(out, "300") {
+		t.Error("expected 300 in help text")
+	}
+	if !strings.Contains(out, "0") {
+		t.Error("expected 0 in help text")
+	}
+}
 
 func TestStatusCmd_NoToken(t *testing.T) {
 	os.Unsetenv("BM_TOKEN")
