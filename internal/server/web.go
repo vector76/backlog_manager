@@ -438,9 +438,11 @@ func buildFeatureDetailData(st Store, monitor *BeadMonitor, projectName, feature
 		if allFeatures, err := st.ListFeatures(projectName, nil); err == nil {
 			for _, f := range allFeatures {
 				if f.ID != featureID &&
-					f.Status != model.StatusDone &&
-					f.Status != model.StatusAbandoned &&
-					f.Status != model.StatusHalted {
+					(f.Status == model.StatusFullySpecified ||
+						f.Status == model.StatusWaiting ||
+						f.Status == model.StatusReadyToGenerate ||
+						f.Status == model.StatusGenerating ||
+						f.Status == model.StatusBeadsCreated) {
 					otherFeatures = append(otherFeatures, featureRowData{
 						ID:     f.ID,
 						Name:   f.Name,
