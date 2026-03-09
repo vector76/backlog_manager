@@ -38,6 +38,9 @@ func handleDashboardSSE(hub *NotifyHub) http.HandlerFunc {
 		defer hub.UnsubscribeDashboard(ch)
 
 		flusher, _ := w.(http.Flusher)
+		if flusher != nil {
+			flusher.Flush()
+		}
 		for {
 			select {
 			case <-ch:
@@ -66,6 +69,9 @@ func handleFeatureSSE(hub *NotifyHub) http.HandlerFunc {
 		defer hub.UnsubscribeFeature(key, ch)
 
 		flusher, _ := w.(http.Flusher)
+		if flusher != nil {
+			flusher.Flush()
+		}
 		for {
 			select {
 			case <-ch:
