@@ -27,9 +27,15 @@ type BeadMonitor struct {
 	client   BeadsClient
 	store    Store
 	interval time.Duration
+	notify   func(projectName, featureID string)
 
 	mu    sync.RWMutex
 	cache map[string]BeadProgress // featureID -> progress
+}
+
+// SetNotify sets a callback that is invoked when a feature's bead state changes.
+func (m *BeadMonitor) SetNotify(fn func(string, string)) {
+	m.notify = fn
 }
 
 // NewBeadMonitor creates a BeadMonitor with the given client, store, and poll interval.
@@ -107,12 +113,17 @@ func (m *BeadMonitor) checkFeature(projectName string, f model.Feature) {
 	}
 
 	m.mu.Lock()
+	prev := m.cache[f.ID]
 	m.cache[f.ID] = BeadProgress{
 		Total:    len(f.BeadIDs),
 		Closed:   closed,
 		Statuses: statuses,
 	}
 	m.mu.Unlock()
+
+	if m.notify != nil && closed != prev.Closed {
+		m.notify(projectName, f.ID)
+	}
 
 	// Auto-complete if all beads are closed.
 	if closed == len(f.BeadIDs) {
@@ -121,6 +132,9 @@ func (m *BeadMonitor) checkFeature(projectName string, f model.Feature) {
 			return
 		}
 		log.Printf("bead monitor: auto-completed feature %s (all %d beads closed)", f.ID, closed)
+		if m.notify != nil {
+			m.notify(projectName, f.ID)
+		}
 		// Dependency resolution: unblock waiting features that depended on this one.
 		if allFeatures, err := m.store.ListFeatures(projectName, nil); err == nil {
 			for _, dep := range allFeatures {

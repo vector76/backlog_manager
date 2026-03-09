@@ -350,7 +350,7 @@ func handleWebNewFeature(st Store) http.HandlerFunc {
 }
 
 // handleWebCreateFeature handles POST /project/{name}/features from the web form.
-func handleWebCreateFeature(st Store) http.HandlerFunc {
+func handleWebCreateFeature(st Store, hub *NotifyHub) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		projectName := chi.URLParam(r, "name")
 		if err := r.ParseForm(); err != nil {
@@ -367,6 +367,7 @@ func handleWebCreateFeature(st Store) http.HandlerFunc {
 			http.Redirect(w, r, "/", http.StatusFound)
 			return
 		}
+		hub.NotifyDashboard()
 		http.Redirect(w, r, "/", http.StatusFound)
 	}
 }
@@ -503,7 +504,7 @@ func handleWebFeature(st Store, monitor *BeadMonitor) http.HandlerFunc {
 
 // handleWebUpdateDescription handles POST /project/{name}/feature/{id}/description.
 // It updates description_v0.md for a draft feature and redirects back.
-func handleWebUpdateDescription(st Store) http.HandlerFunc {
+func handleWebUpdateDescription(st Store, hub *NotifyHub) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		projectName := chi.URLParam(r, "name")
 		featureID := chi.URLParam(r, "id")
@@ -514,17 +515,19 @@ func handleWebUpdateDescription(st Store) http.HandlerFunc {
 		}
 		description := r.FormValue("description")
 		_ = st.UpdateDescriptionV0(projectName, featureID, description)
+		hub.NotifyFeature(projectName + ":" + featureID)
 		http.Redirect(w, r, featurePage, http.StatusFound)
 	}
 }
 
 // handleWebStartDialog handles POST /project/{name}/feature/{id}/start-dialog.
 // It starts the dialog for a draft feature and redirects back.
-func handleWebStartDialog(st Store) http.HandlerFunc {
+func handleWebStartDialog(st Store, hub *NotifyHub) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		projectName := chi.URLParam(r, "name")
 		featureID := chi.URLParam(r, "id")
 		_ = st.StartDialog(projectName, featureID)
+		hub.NotifyFeature(projectName + ":" + featureID)
 		http.Redirect(w, r, "/project/"+projectName+"/feature/"+featureID, http.StatusFound)
 	}
 }
@@ -532,7 +535,7 @@ func handleWebStartDialog(st Store) http.HandlerFunc {
 // handleWebRespond handles POST /project/{name}/feature/{id}/respond.
 // It stores the user's response and redirects back. The "final" form field controls
 // whether this is marked as a final response.
-func handleWebRespond(st Store) http.HandlerFunc {
+func handleWebRespond(st Store, hub *NotifyHub) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		projectName := chi.URLParam(r, "name")
 		featureID := chi.URLParam(r, "id")
@@ -544,13 +547,14 @@ func handleWebRespond(st Store) http.HandlerFunc {
 		response := r.FormValue("response")
 		final := r.FormValue("final") == "on"
 		_ = st.RespondToDialog(projectName, featureID, response, final)
+		hub.NotifyFeature(projectName + ":" + featureID)
 		http.Redirect(w, r, featurePage, http.StatusFound)
 	}
 }
 
 // handleWebReopen handles POST /project/{name}/feature/{id}/reopen.
 // It reopens a fully-specified feature dialog and redirects back.
-func handleWebReopen(st Store) http.HandlerFunc {
+func handleWebReopen(st Store, hub *NotifyHub) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		projectName := chi.URLParam(r, "name")
 		featureID := chi.URLParam(r, "id")
@@ -561,24 +565,26 @@ func handleWebReopen(st Store) http.HandlerFunc {
 		}
 		message := r.FormValue("message")
 		_ = st.ReopenDialog(projectName, featureID, message)
+		hub.NotifyFeature(projectName + ":" + featureID)
 		http.Redirect(w, r, featurePage, http.StatusFound)
 	}
 }
 
 // handleWebGenerateNow handles POST /project/{name}/feature/{id}/generate-now.
 // Transitions a fully_specified feature to ready_to_generate and redirects back.
-func handleWebGenerateNow(st Store) http.HandlerFunc {
+func handleWebGenerateNow(st Store, hub *NotifyHub) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		projectName := chi.URLParam(r, "name")
 		featureID := chi.URLParam(r, "id")
 		_ = st.TransitionStatus(projectName, featureID, model.StatusReadyToGenerate)
+		hub.NotifyFeature(projectName + ":" + featureID)
 		http.Redirect(w, r, "/project/"+projectName+"/feature/"+featureID, http.StatusFound)
 	}
 }
 
 // handleWebGenerateAfter handles POST /project/{name}/feature/{id}/generate-after.
 // Sets a dependency on another feature and transitions to waiting, then redirects back.
-func handleWebGenerateAfter(st Store) http.HandlerFunc {
+func handleWebGenerateAfter(st Store, hub *NotifyHub) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		projectName := chi.URLParam(r, "name")
 		featureID := chi.URLParam(r, "id")
@@ -604,6 +610,7 @@ func handleWebGenerateAfter(st Store) http.HandlerFunc {
 		f.GenerateAfter = afterFeatureID
 		_ = st.UpdateFeature(f)
 		_ = st.TransitionStatus(projectName, featureID, model.StatusWaiting)
+		hub.NotifyFeature(projectName + ":" + featureID)
 		http.Redirect(w, r, featurePage, http.StatusFound)
 	}
 }

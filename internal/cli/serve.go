@@ -37,12 +37,15 @@ func newServeCmd() *cobra.Command {
 			if cfg.BeadsServerURL != "" {
 				client := beadsserver.New(cfg.BeadsServerURL)
 				monitor = server.NewBeadMonitor(client, st, beadPollInterval)
-				monitor.Start()
-				log.Printf("bead monitor started, polling %s every %s", cfg.BeadsServerURL, beadPollInterval)
 			}
 
 			srv, hub := server.New(cfg, st, monitor)
 			defer hub.Stop()
+
+			if monitor != nil {
+				monitor.Start()
+				log.Printf("bead monitor started, polling %s every %s", cfg.BeadsServerURL, beadPollInterval)
+			}
 			log.Printf("starting server on %s", srv.Addr)
 			if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
 				return err

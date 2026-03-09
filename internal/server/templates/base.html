@@ -27,6 +27,9 @@
 <main>
 {{block "content" .}}{{end}}
 </main>
+<footer>
+  <span id="live-status" style="display:none"></span>
+</footer>
 <script>
 // Re-apply theme (in case script loaded before DOMContentLoaded)
 (function(){var t=localStorage.getItem('bm-theme')||'light';document.documentElement.setAttribute('data-theme',t);})();

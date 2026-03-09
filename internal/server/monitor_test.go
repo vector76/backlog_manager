@@ -240,3 +240,74 @@ func TestBeadMonitor_poll_zeroBeads_autoComplete(t *testing.T) {
 		t.Errorf("zero-bead feature: want done after poll, got %s", f.Status)
 	}
 }
+
+func TestBeadMonitor_setNotify_calledOnCountChange(t *testing.T) {
+	beadIDs := []string{"bd-f1", "bd-f2", "bd-f3"}
+	st, _, featureID := newMonitorStore(t, beadIDs)
+
+	// First poll: 1 closed.
+	srv1 := mockBeadsServer(t, map[string]string{
+		"bd-f1": "closed",
+		"bd-f2": "open",
+		"bd-f3": "open",
+	})
+	defer srv1.Close()
+
+	client := beadsserver.New(srv1.URL)
+	monitor := server.NewBeadMonitor(client, st, time.Hour)
+
+	var notified []string
+	monitor.SetNotify(func(proj, feat string) {
+		notified = append(notified, proj+":"+feat)
+	})
+
+	monitor.Poll() // closed goes 0→1
+	if len(notified) != 1 {
+		t.Fatalf("after first poll: want 1 notify, got %d", len(notified))
+	}
+	if notified[0] != "testproject:"+featureID {
+		t.Errorf("notify key: want testproject:%s, got %s", featureID, notified[0])
+	}
+
+	// Second poll with same count: no notify.
+	notified = nil
+	monitor.Poll()
+	if len(notified) != 0 {
+		t.Errorf("second poll with no change: want 0 notifies, got %d", len(notified))
+	}
+}
+
+func TestBeadMonitor_setNotify_calledOnAutoComplete(t *testing.T) {
+	beadIDs := []string{"bd-g1", "bd-g2"}
+	st, projName, featureID := newMonitorStore(t, beadIDs)
+
+	srv := mockBeadsServer(t, map[string]string{
+		"bd-g1": "closed",
+		"bd-g2": "closed",
+	})
+	defer srv.Close()
+
+	client := beadsserver.New(srv.URL)
+	monitor := server.NewBeadMonitor(client, st, time.Hour)
+
+	var notifyCount int
+	monitor.SetNotify(func(proj, feat string) {
+		notifyCount++
+	})
+
+	monitor.Poll() // all closed → notify for count change + notify for auto-complete
+
+	// At least the auto-complete notify must fire.
+	if notifyCount < 1 {
+		t.Fatalf("want at least 1 notify on auto-complete, got %d", notifyCount)
+	}
+
+	// Feature must be done.
+	f, err := st.GetFeature(projName, featureID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.Status != model.StatusDone {
+		t.Errorf("status: want done, got %s", f.Status)
+	}
+}

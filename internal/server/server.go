@@ -71,6 +71,10 @@ func New(cfg *config.Config, st Store, monitors ...*BeadMonitor) (*http.Server, 
 	hub := NewNotifyHub()
 	hub.Start(context.Background())
 
+	if monitor != nil {
+		monitor.SetNotify(func(proj, feat string) { hub.NotifyFeature(proj + ":" + feat) })
+	}
+
 	r := chi.NewRouter()
 	r.Use(middleware.Recoverer)
 
@@ -84,16 +88,16 @@ func New(cfg *config.Config, st Store, monitors ...*BeadMonitor) (*http.Server, 
 		r.Get("/api/v1/projects", handleListProjects(st))
 		r.Get("/api/v1/projects/{name}", handleGetProject(st))
 		r.Delete("/api/v1/projects/{name}", handleDeleteProject(st))
-		r.Post("/api/v1/projects/{name}/features", handleCreateFeature(st))
+		r.Post("/api/v1/projects/{name}/features", handleCreateFeature(st, hub))
 		r.Get("/api/v1/projects/{name}/features", handleListProjectFeatures(st))
 		r.Get("/api/v1/projects/{name}/features/{id}", handleGetProjectFeature(st))
-		r.Patch("/api/v1/projects/{name}/features/{id}", handleUpdateFeature(st))
-		r.Delete("/api/v1/projects/{name}/features/{id}", handleAbandonFeature(st))
-		r.Post("/api/v1/projects/{name}/features/{id}/start-dialog", handleStartDialog(st))
-		r.Post("/api/v1/projects/{name}/features/{id}/respond", handleRespondToDialog(st))
-		r.Post("/api/v1/projects/{name}/features/{id}/reopen", handleReopenDialog(st))
-		r.Post("/api/v1/projects/{name}/features/{id}/generate-now", handleGenerateNow(st))
-		r.Post("/api/v1/projects/{name}/features/{id}/generate-after", handleGenerateAfter(st))
+		r.Patch("/api/v1/projects/{name}/features/{id}", handleUpdateFeature(st, hub))
+		r.Delete("/api/v1/projects/{name}/features/{id}", handleAbandonFeature(st, hub))
+		r.Post("/api/v1/projects/{name}/features/{id}/start-dialog", handleStartDialog(st, hub))
+		r.Post("/api/v1/projects/{name}/features/{id}/respond", handleRespondToDialog(st, hub))
+		r.Post("/api/v1/projects/{name}/features/{id}/reopen", handleReopenDialog(st, hub))
+		r.Post("/api/v1/projects/{name}/features/{id}/generate-now", handleGenerateNow(st, hub))
+		r.Post("/api/v1/projects/{name}/features/{id}/generate-after", handleGenerateAfter(st, hub))
 	})
 
 	// Token auth routes
@@ -102,14 +106,14 @@ func New(cfg *config.Config, st Store, monitors ...*BeadMonitor) (*http.Server, 
 		r.Get("/api/v1/project", handleGetOwnProject(st))
 		r.Get("/api/v1/features", handleListClientFeatures(st))
 		r.Get("/api/v1/features/{id}", handleGetClientFeature(st))
-		r.Get("/api/v1/poll", handlePoll(st))
+		r.Get("/api/v1/poll", handlePoll(st, hub))
 		r.Get("/api/v1/features/{id}/pending", handleGetPending(st))
-		r.Post("/api/v1/features/{id}/submit-dialog", handleSubmitDialog(st))
-		r.Post("/api/v1/features/{id}/start-generate", handleStartGenerate(st))
-		r.Post("/api/v1/features/{id}/register-bead", handleRegisterBead(st))
-		r.Post("/api/v1/features/{id}/beads-done", handleBeadsDone(st))
-		r.Post("/api/v1/features/{id}/register-artifact", handleRegisterArtifact(st))
-		r.Post("/api/v1/features/{id}/complete", handleCompleteFeature(st))
+		r.Post("/api/v1/features/{id}/submit-dialog", handleSubmitDialog(st, hub))
+		r.Post("/api/v1/features/{id}/start-generate", handleStartGenerate(st, hub))
+		r.Post("/api/v1/features/{id}/register-bead", handleRegisterBead(st, hub))
+		r.Post("/api/v1/features/{id}/beads-done", handleBeadsDone(st, hub))
+		r.Post("/api/v1/features/{id}/register-artifact", handleRegisterArtifact(st, hub))
+		r.Post("/api/v1/features/{id}/complete", handleCompleteFeature(st, hub))
 	})
 
 	// Web dashboard routes
@@ -125,14 +129,14 @@ func New(cfg *config.Config, st Store, monitors ...*BeadMonitor) (*http.Server, 
 		r.Get("/", handleWebDashboard(st, monitor))
 		r.Post("/projects", handleWebCreateProject(st))
 		r.Get("/project/{name}/new", handleWebNewFeature(st))
-		r.Post("/project/{name}/features", handleWebCreateFeature(st))
+		r.Post("/project/{name}/features", handleWebCreateFeature(st, hub))
 		r.Get("/project/{name}/feature/{id}", handleWebFeature(st, monitor))
-		r.Post("/project/{name}/feature/{id}/description", handleWebUpdateDescription(st))
-		r.Post("/project/{name}/feature/{id}/start-dialog", handleWebStartDialog(st))
-		r.Post("/project/{name}/feature/{id}/respond", handleWebRespond(st))
-		r.Post("/project/{name}/feature/{id}/reopen", handleWebReopen(st))
-		r.Post("/project/{name}/feature/{id}/generate-now", handleWebGenerateNow(st))
-		r.Post("/project/{name}/feature/{id}/generate-after", handleWebGenerateAfter(st))
+		r.Post("/project/{name}/feature/{id}/description", handleWebUpdateDescription(st, hub))
+		r.Post("/project/{name}/feature/{id}/start-dialog", handleWebStartDialog(st, hub))
+		r.Post("/project/{name}/feature/{id}/respond", handleWebRespond(st, hub))
+		r.Post("/project/{name}/feature/{id}/reopen", handleWebReopen(st, hub))
+		r.Post("/project/{name}/feature/{id}/generate-now", handleWebGenerateNow(st, hub))
+		r.Post("/project/{name}/feature/{id}/generate-after", handleWebGenerateAfter(st, hub))
 		r.Get("/events", handleDashboardSSE(hub))
 		r.Get("/data", handleDashboardData(st, monitor))
 		r.Get("/project/{name}/feature/{id}/events", handleFeatureSSE(hub))
@@ -436,7 +440,7 @@ func filterByStatuses(features []model.Feature, statuses []model.FeatureStatus) 
 
 // --- Dashboard feature handlers ---
 
-func handleCreateFeature(st Store) http.HandlerFunc {
+func handleCreateFeature(st Store, hub *NotifyHub) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		projectName := chi.URLParam(r, "name")
 		if _, err := st.GetProject(projectName); err != nil {
@@ -457,6 +461,7 @@ func handleCreateFeature(st Store) http.HandlerFunc {
 			writeError(w, http.StatusInternalServerError, "internal error")
 			return
 		}
+		hub.NotifyDashboard()
 		writeJSON(w, http.StatusCreated, toFeatureResponse(*f))
 	}
 }
@@ -504,7 +509,7 @@ func handleGetProjectFeature(st Store) http.HandlerFunc {
 	}
 }
 
-func handleUpdateFeature(st Store) http.HandlerFunc {
+func handleUpdateFeature(st Store, hub *NotifyHub) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		projectName := chi.URLParam(r, "name")
 		featureID := chi.URLParam(r, "id")
@@ -541,7 +546,8 @@ func handleUpdateFeature(st Store) http.HandlerFunc {
 		if req.Name != nil {
 			f.Name = *req.Name
 		}
-		if req.Name != nil || req.Description != nil {
+		changed := req.Name != nil || req.Description != nil
+		if changed {
 			if err := st.UpdateFeature(f); err != nil {
 				writeError(w, http.StatusInternalServerError, "internal error")
 				return
@@ -553,11 +559,14 @@ func handleUpdateFeature(st Store) http.HandlerFunc {
 			writeError(w, http.StatusInternalServerError, "internal error")
 			return
 		}
+		if changed {
+			hub.NotifyFeature(projectName + ":" + featureID)
+		}
 		writeJSON(w, http.StatusOK, toFeatureResponse(*updated))
 	}
 }
 
-func handleAbandonFeature(st Store) http.HandlerFunc {
+func handleAbandonFeature(st Store, hub *NotifyHub) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		projectName := chi.URLParam(r, "name")
 		featureID := chi.URLParam(r, "id")
@@ -575,6 +584,7 @@ func handleAbandonFeature(st Store) http.HandlerFunc {
 			writeError(w, http.StatusInternalServerError, "internal error")
 			return
 		}
+		hub.NotifyFeature(projectName + ":" + featureID)
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
@@ -630,7 +640,7 @@ func handleGetClientFeature(st Store) http.HandlerFunc {
 
 // --- Dialog state machine handlers ---
 
-func handleStartDialog(st Store) http.HandlerFunc {
+func handleStartDialog(st Store, hub *NotifyHub) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		projectName := chi.URLParam(r, "name")
 		featureID := chi.URLParam(r, "id")
@@ -649,6 +659,7 @@ func handleStartDialog(st Store) http.HandlerFunc {
 			writeError(w, http.StatusInternalServerError, "internal error")
 			return
 		}
+		hub.NotifyFeature(projectName + ":" + featureID)
 		writeJSON(w, http.StatusOK, toFeatureResponse(*f))
 	}
 }
@@ -658,7 +669,7 @@ type respondRequest struct {
 	Final    bool   `json:"final"`
 }
 
-func handleRespondToDialog(st Store) http.HandlerFunc {
+func handleRespondToDialog(st Store, hub *NotifyHub) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		projectName := chi.URLParam(r, "name")
 		featureID := chi.URLParam(r, "id")
@@ -682,6 +693,7 @@ func handleRespondToDialog(st Store) http.HandlerFunc {
 			writeError(w, http.StatusInternalServerError, "internal error")
 			return
 		}
+		hub.NotifyFeature(projectName + ":" + featureID)
 		writeJSON(w, http.StatusOK, toFeatureResponse(*f))
 	}
 }
@@ -690,7 +702,7 @@ type reopenRequest struct {
 	Message string `json:"message"`
 }
 
-func handleReopenDialog(st Store) http.HandlerFunc {
+func handleReopenDialog(st Store, hub *NotifyHub) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		projectName := chi.URLParam(r, "name")
 		featureID := chi.URLParam(r, "id")
@@ -714,6 +726,7 @@ func handleReopenDialog(st Store) http.HandlerFunc {
 			writeError(w, http.StatusInternalServerError, "internal error")
 			return
 		}
+		hub.NotifyFeature(projectName + ":" + featureID)
 		writeJSON(w, http.StatusOK, toFeatureResponse(*f))
 	}
 }
@@ -747,7 +760,7 @@ func findActionableFeature(st Store, projectName string) (model.Feature, model.F
 // handlePoll handles GET /api/v1/poll — long-poll until work is available.
 // Returns 200 with action JSON when work is available; 204 on timeout.
 // Accepts optional ?timeout=N query param (seconds, max 30) for testing.
-func handlePoll(st Store) http.HandlerFunc {
+func handlePoll(st Store, hub *NotifyHub) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		project, ok := r.Context().Value(projectContextKey).(*model.Project)
 		if !ok || project == nil {
@@ -756,6 +769,7 @@ func handlePoll(st Store) http.HandlerFunc {
 		}
 
 		st.RecordPoll(project.Name)
+		hub.NotifyDashboard()
 
 		timeout := pollTimeout
 		if q := r.URL.Query().Get("timeout"); q != "" {
@@ -906,7 +920,7 @@ type submitDialogRequest struct {
 }
 
 // handleSubmitDialog handles POST /api/v1/features/{id}/submit-dialog.
-func handleSubmitDialog(st Store) http.HandlerFunc {
+func handleSubmitDialog(st Store, hub *NotifyHub) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		project, ok := r.Context().Value(projectContextKey).(*model.Project)
 		if !ok || project == nil {
@@ -941,6 +955,7 @@ func handleSubmitDialog(st Store) http.HandlerFunc {
 			writeError(w, http.StatusInternalServerError, "internal error")
 			return
 		}
+		hub.NotifyFeature(project.Name + ":" + featureID)
 		writeJSON(w, http.StatusOK, toFeatureResponse(*f))
 	}
 }
@@ -949,7 +964,7 @@ func handleSubmitDialog(st Store) http.HandlerFunc {
 
 // handleGenerateNow handles POST /api/v1/projects/{name}/features/{id}/generate-now.
 // Transitions a fully_specified feature to ready_to_generate.
-func handleGenerateNow(st Store) http.HandlerFunc {
+func handleGenerateNow(st Store, hub *NotifyHub) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		projectName := chi.URLParam(r, "name")
 		featureID := chi.URLParam(r, "id")
@@ -968,6 +983,7 @@ func handleGenerateNow(st Store) http.HandlerFunc {
 			writeError(w, http.StatusInternalServerError, "internal error")
 			return
 		}
+		hub.NotifyFeature(projectName + ":" + featureID)
 		writeJSON(w, http.StatusOK, toFeatureResponse(*f))
 	}
 }
@@ -978,7 +994,7 @@ type generateAfterRequest struct {
 
 // handleGenerateAfter handles POST /api/v1/projects/{name}/features/{id}/generate-after.
 // Sets a dependency on another feature and transitions to waiting.
-func handleGenerateAfter(st Store) http.HandlerFunc {
+func handleGenerateAfter(st Store, hub *NotifyHub) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		projectName := chi.URLParam(r, "name")
 		featureID := chi.URLParam(r, "id")
@@ -1022,13 +1038,14 @@ func handleGenerateAfter(st Store) http.HandlerFunc {
 			writeError(w, http.StatusInternalServerError, "internal error")
 			return
 		}
+		hub.NotifyFeature(projectName + ":" + featureID)
 		writeJSON(w, http.StatusOK, toFeatureResponse(*updated))
 	}
 }
 
 // handleStartGenerate handles POST /api/v1/features/{id}/start-generate.
 // Transitions a ready_to_generate feature to generating.
-func handleStartGenerate(st Store) http.HandlerFunc {
+func handleStartGenerate(st Store, hub *NotifyHub) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		project, ok := r.Context().Value(projectContextKey).(*model.Project)
 		if !ok || project == nil {
@@ -1051,6 +1068,7 @@ func handleStartGenerate(st Store) http.HandlerFunc {
 			writeError(w, http.StatusInternalServerError, "internal error")
 			return
 		}
+		hub.NotifyFeature(project.Name + ":" + featureID)
 		writeJSON(w, http.StatusOK, toFeatureResponse(*f))
 	}
 }
@@ -1061,7 +1079,7 @@ type registerBeadRequest struct {
 
 // handleRegisterBead handles POST /api/v1/features/{id}/register-bead.
 // Appends a single bead ID to the feature; feature remains in generating status.
-func handleRegisterBead(st Store) http.HandlerFunc {
+func handleRegisterBead(st Store, hub *NotifyHub) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		project, ok := r.Context().Value(projectContextKey).(*model.Project)
 		if !ok || project == nil {
@@ -1093,13 +1111,14 @@ func handleRegisterBead(st Store) http.HandlerFunc {
 			writeError(w, http.StatusInternalServerError, "internal error")
 			return
 		}
+		hub.NotifyFeature(project.Name + ":" + featureID)
 		writeJSON(w, http.StatusOK, toFeatureResponse(*updated))
 	}
 }
 
 // handleBeadsDone handles POST /api/v1/features/{id}/beads-done.
 // Transitions a generating feature to beads_created; no body required.
-func handleBeadsDone(st Store) http.HandlerFunc {
+func handleBeadsDone(st Store, hub *NotifyHub) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		project, ok := r.Context().Value(projectContextKey).(*model.Project)
 		if !ok || project == nil {
@@ -1133,6 +1152,7 @@ func handleBeadsDone(st Store) http.HandlerFunc {
 			writeError(w, http.StatusInternalServerError, "internal error")
 			return
 		}
+		hub.NotifyFeature(project.Name + ":" + featureID)
 		writeJSON(w, http.StatusOK, toFeatureResponse(*updated))
 	}
 }
@@ -1144,7 +1164,7 @@ type registerArtifactRequest struct {
 
 // handleRegisterArtifact handles POST /api/v1/features/{id}/register-artifact.
 // Stores a plan.md or beads.md artifact for a feature.
-func handleRegisterArtifact(st Store) http.HandlerFunc {
+func handleRegisterArtifact(st Store, hub *NotifyHub) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		project, ok := r.Context().Value(projectContextKey).(*model.Project)
 		if !ok || project == nil {
@@ -1174,13 +1194,14 @@ func handleRegisterArtifact(st Store) http.HandlerFunc {
 			return
 		}
 		st.RecordPoll(project.Name)
+		hub.NotifyDashboard()
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
 
 // handleCompleteFeature handles POST /api/v1/features/{id}/complete.
 // Transitions beads_created -> done and unblocks dependent waiting features.
-func handleCompleteFeature(st Store) http.HandlerFunc {
+func handleCompleteFeature(st Store, hub *NotifyHub) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		project, ok := r.Context().Value(projectContextKey).(*model.Project)
 		if !ok || project == nil {
@@ -1211,6 +1232,7 @@ func handleCompleteFeature(st Store) http.HandlerFunc {
 			writeError(w, http.StatusInternalServerError, "internal error")
 			return
 		}
+		hub.NotifyFeature(project.Name + ":" + featureID)
 		writeJSON(w, http.StatusOK, toFeatureResponse(*updated))
 	}
 }
