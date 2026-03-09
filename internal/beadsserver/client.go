@@ -2,6 +2,8 @@
 package beadsserver
 
 import (
+	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -21,6 +23,40 @@ func New(url string) *Client {
 		URL:        strings.TrimRight(url, "/"),
 		HTTPClient: &http.Client{Timeout: 10 * time.Second},
 	}
+}
+
+// SubscribeSSE opens an SSE stream to /events and returns a receive-only channel.
+// One send occurs per "data:" line received. The channel is closed when the
+// connection drops (EOF or error). Cancel the stream via the provided context.
+func (c *Client) SubscribeSSE(ctx context.Context) <-chan struct{} {
+	ch := make(chan struct{}, 1)
+	sseClient := &http.Client{} // no timeout for long-lived SSE connection
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.URL+"/events", nil)
+	if err != nil {
+		close(ch)
+		return ch
+	}
+	resp, err := sseClient.Do(req)
+	if err != nil {
+		close(ch)
+		return ch
+	}
+	go func() {
+		defer close(ch)
+		defer resp.Body.Close()
+		scanner := bufio.NewScanner(resp.Body)
+		for scanner.Scan() {
+			line := scanner.Text()
+			if strings.HasPrefix(line, "data:") {
+				select {
+				case ch <- struct{}{}:
+				case <-ctx.Done():
+					return
+				}
+			}
+		}
+	}()
+	return ch
 }
 
 // GetStatuses queries the status of the given bead IDs.
