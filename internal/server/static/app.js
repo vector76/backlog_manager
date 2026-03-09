@@ -67,8 +67,58 @@
       });
     }
 
-    // Feature live update
+    // Shared project state helpers
+    var PROJECT_STATE_KEY = "bm-project-state";
+
+    function loadProjectStates() {
+      try { return JSON.parse(localStorage.getItem(PROJECT_STATE_KEY)) || {}; } catch (e) { return {}; }
+    }
+
+    function saveProjectStates(states) {
+      localStorage.setItem(PROJECT_STATE_KEY, JSON.stringify(states));
+    }
+
+    // Shared status/HTML helpers (used by both feature and dashboard live update)
+    function statusLabel(s) {
+      var m = {
+        awaiting_human: 'Awaiting Human',
+        awaiting_client: 'Awaiting Client',
+        draft: 'Draft',
+        fully_specified: 'Fully Specified',
+        waiting: 'Waiting',
+        ready_to_generate: 'Ready to Generate',
+        generating: 'Generating',
+        beads_created: 'Beads Created',
+        done: 'Done',
+        halted: 'Halted',
+        abandoned: 'Abandoned'
+      };
+      return m[s] || s;
+    }
+
+    function statusBadgeClass(s) {
+      var c = {
+        awaiting_human: 'badge-awaiting-human',
+        awaiting_client: 'badge-awaiting-client',
+        draft: 'badge-draft',
+        fully_specified: 'badge-fully-specified',
+        done: 'badge-done'
+      };
+      return c[s] || 'badge-default';
+    }
+
+    function escHTML(s) {
+      return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    // Live page detection
     var livePage = document.querySelector('[data-live-page]');
+
+    // Feature live update
     if (livePage && livePage.dataset.livePage === 'feature') {
       var projectName = livePage.dataset.project;
       var featureID = livePage.dataset.featureId;
@@ -105,42 +155,6 @@
           .catch(function () {
             if (liveStatus) liveStatus.textContent = 'Live update failed';
           });
-      }
-
-      function featureStatusLabel(s) {
-        var m = {
-          awaiting_human: 'Awaiting Human',
-          awaiting_client: 'Awaiting Client',
-          draft: 'Draft',
-          fully_specified: 'Fully Specified',
-          waiting: 'Waiting',
-          ready_to_generate: 'Ready to Generate',
-          generating: 'Generating',
-          beads_created: 'Beads Created',
-          done: 'Done',
-          halted: 'Halted',
-          abandoned: 'Abandoned'
-        };
-        return m[s] || s;
-      }
-
-      function featureStatusBadgeClass(s) {
-        var c = {
-          awaiting_human: 'badge-awaiting-human',
-          awaiting_client: 'badge-awaiting-client',
-          draft: 'badge-draft',
-          fully_specified: 'badge-fully-specified',
-          done: 'badge-done'
-        };
-        return c[s] || 'badge-default';
-      }
-
-      function escHTML(s) {
-        return String(s)
-          .replace(/&/g, '&amp;')
-          .replace(/</g, '&lt;')
-          .replace(/>/g, '&gt;')
-          .replace(/"/g, '&quot;');
       }
 
       function buildActionHTML(data) {
@@ -205,7 +219,7 @@
 
         if (s === 'waiting' || s === 'ready_to_generate' || s === 'generating') {
           return '<div class="card"><div class="muted" style="margin-bottom:0.5rem">Status: <strong>' +
-            featureStatusLabel(s) + '</strong></div><button type="button" class="btn" disabled>Halt</button></div>';
+            statusLabel(s) + '</strong></div><button type="button" class="btn" disabled>Halt</button></div>';
         }
 
         if (s === 'beads_created') {
@@ -224,7 +238,7 @@
             }
           }
           return '<div class="card"><div class="muted" style="margin-bottom:0.5rem">Status: <strong>' +
-            featureStatusLabel(s) + '</strong></div>' + progressHTML +
+            statusLabel(s) + '</strong></div>' + progressHTML +
             '<button type="button" class="btn" disabled>Halt</button></div>';
         }
 
@@ -256,8 +270,8 @@
         // Update status badge
         var badge = livePage.querySelector('.badge');
         if (badge) {
-          badge.textContent = featureStatusLabel(data.status);
-          badge.className = 'badge ' + featureStatusBadgeClass(data.status);
+          badge.textContent = statusLabel(data.status);
+          badge.className = 'badge ' + statusBadgeClass(data.status);
         }
 
         // Update action section (skip if user is interacting with a form field)
@@ -311,36 +325,216 @@
       fetchFeature();
     }
 
-    // Project expand/collapse persistence
-    var PROJECT_STATE_KEY = "bm-project-state";
+    // Dashboard live update
+    if (livePage && livePage.dataset.livePage === 'dashboard') {
+      var dashLiveStatus = document.getElementById('live-status');
+      var dashSecondsAgo = 0;
+      if (dashLiveStatus) {
+        dashLiveStatus.style.display = '';
+        dashLiveStatus.textContent = 'Updated 0s ago';
+        setInterval(function () {
+          dashSecondsAgo++;
+          dashLiveStatus.textContent = 'Updated ' + dashSecondsAgo + 's ago';
+        }, 1000);
+      }
 
-    function loadProjectStates() {
-      try { return JSON.parse(localStorage.getItem(PROJECT_STATE_KEY)) || {}; } catch (e) { return {}; }
-    }
+      var dashEsOpened = false;
+      var dashEs = new EventSource('/events');
+      dashEs.addEventListener('update', function () { fetchDashboard(); });
+      dashEs.onopen = function () {
+        if (dashEsOpened) {
+          fetchDashboard();
+        }
+        dashEsOpened = true;
+      };
 
-    function saveProjectStates(states) {
-      localStorage.setItem(PROJECT_STATE_KEY, JSON.stringify(states));
-    }
+      function fetchDashboard() {
+        fetch('/data', { cache: 'no-store' })
+          .then(function (r) {
+            if (!r.ok) throw new Error('not ok');
+            return r.json();
+          })
+          .then(function (data) {
+            dashSecondsAgo = 0;
+            if (dashLiveStatus) dashLiveStatus.textContent = 'Updated 0s ago';
+            patchDashboard(data);
+          })
+          .catch(function () {
+            if (dashLiveStatus) dashLiveStatus.textContent = 'Update failed \u2014 retrying';
+          });
+      }
 
-    var details = document.querySelectorAll("details[data-project]");
-    var states = loadProjectStates();
-    var changed = false;
+      function buildProjectBodyHTML(p) {
+        var proj = escHTML(p.name);
+        if (!p.features || p.features.length === 0) {
+          return '<div class="project-body"><p class="muted">No features yet. <a href="/project/' + proj + '/new">Create one</a>.</p></div>';
+        }
+        var rows = '';
+        for (var i = 0; i < p.features.length; i++) {
+          var f = p.features[i];
+          var beadHTML = f.bead_info
+            ? '<span class="muted" style="font-size:0.8rem;margin-left:0.4rem">' + escHTML(f.bead_info) + '</span>'
+            : '';
+          rows += '<tr>' +
+            '<td><a href="/project/' + proj + '/feature/' + escHTML(f.id) + '">' + escHTML(f.name) + '</a></td>' +
+            '<td><span class="badge ' + escHTML(statusBadgeClass(f.status)) + '">' + escHTML(statusLabel(f.status)) + '</span>' + beadHTML + '</td>' +
+            '<td class="muted" style="font-size:0.85rem;white-space:nowrap">' + escHTML(f.updated_at) + '</td>' +
+            '</tr>';
+        }
+        return '<div class="project-body"><table class="feature-table"><thead><tr><th>Name</th><th>Status</th><th>Updated</th></tr></thead><tbody>' + rows + '</tbody></table></div>';
+      }
 
-    details.forEach(function (el) {
-      var name = el.getAttribute("data-project");
-      if (Object.prototype.hasOwnProperty.call(states, name)) {
-        el.open = states[name];
-      } else {
+      function attachToggleListener(el, name) {
+        if (el._toggleHandler) {
+          el.removeEventListener('toggle', el._toggleHandler);
+        }
+        el._toggleHandler = function () {
+          var s = loadProjectStates();
+          s[name] = el.open;
+          saveProjectStates(s);
+        };
+        el.addEventListener('toggle', el._toggleHandler);
+      }
+
+      // Restores el.open from states[name], defaulting to open on first visit.
+      // Returns true if states was mutated (new entry added).
+      function applyOpenState(el, name, states) {
+        if (Object.prototype.hasOwnProperty.call(states, name)) {
+          el.open = states[name];
+          return false;
+        }
         el.open = true;
         states[name] = true;
-        changed = true;
+        return true;
       }
-      el.addEventListener("toggle", function () {
-        var s = loadProjectStates();
-        s[name] = el.open;
-        saveProjectStates(s);
+
+      function patchDashboard(data) {
+        var states = loadProjectStates();
+        var statesChanged = false;
+        var projectNames = Object.create(null);
+
+        for (var i = 0; i < data.projects.length; i++) {
+          projectNames[data.projects[i].name] = true;
+        }
+
+        // Snapshot existing cards once; track insertion point for newly appended cards.
+        var existingCards = document.querySelectorAll('.project-card');
+        var insertAfter = existingCards.length > 0 ? existingCards[existingCards.length - 1] : null;
+
+        for (var j = 0; j < data.projects.length; j++) {
+          var p = data.projects[j];
+          var el = document.querySelector('details[data-project="' + p.name + '"]');
+
+          if (el) {
+            // Replace project body content
+            var bodyDiv = el.querySelector('.project-body');
+            var tmp = document.createElement('div');
+            tmp.innerHTML = buildProjectBodyHTML(p);
+            var newBodyEl = tmp.firstChild;
+            if (bodyDiv) {
+              bodyDiv.parentNode.replaceChild(newBodyEl, bodyDiv);
+            } else {
+              el.appendChild(newBodyEl);
+            }
+
+            // Update connectivity badge in summary
+            var connSpan = el.querySelector('summary .connectivity');
+            if (connSpan) {
+              if (p.connectivity) {
+                var isConnected = p.connectivity.indexOf('Connected') === 0;
+                connSpan.className = 'connectivity' + (isConnected ? ' connected' : '');
+                connSpan.textContent = '\u25cf ' + p.connectivity;
+              } else {
+                connSpan.className = 'connectivity muted';
+                connSpan.textContent = '\u25cb Never connected';
+              }
+            }
+
+            // Restore open state from localStorage (default open on first visit)
+            if (applyOpenState(el, p.name, states)) statesChanged = true;
+
+            // Re-attach toggle listener
+            attachToggleListener(el, p.name);
+          } else {
+            // Append new project card
+            var isConn = p.connectivity && p.connectivity.indexOf('Connected') === 0;
+            var connHTML = p.connectivity
+              ? '<span class="connectivity' + (isConn ? ' connected' : '') + '" style="margin-left:0.5rem">\u25cf ' + escHTML(p.connectivity) + '</span>'
+              : '<span class="connectivity muted" style="margin-left:0.5rem">\u25cb Never connected</span>';
+            var featureCountText = p.feature_count === 1 ? '1 feature' : (p.feature_count + ' features');
+            var cardHTML = '<div class="card project-card">' +
+              '<details data-project="' + escHTML(p.name) + '">' +
+              '<summary>' +
+              '<span style="font-weight:600;font-size:1.1rem">' + escHTML(p.name) + '</span>' +
+              '<span class="muted" style="font-size:0.85rem;margin-left:0.5rem">' + escHTML(featureCountText) + '</span>' +
+              connHTML +
+              '<span class="spacer"></span>' +
+              '<a class="btn btn-secondary btn-sm" href="/project/' + escHTML(p.name) + '/new" onclick="event.stopPropagation()">+ New Feature</a>' +
+              '</summary>' +
+              buildProjectBodyHTML(p) +
+              '</details></div>';
+
+            var cardTmp = document.createElement('div');
+            cardTmp.innerHTML = cardHTML;
+            var newCard = cardTmp.firstChild;
+
+            if (insertAfter) {
+              insertAfter.parentNode.insertBefore(newCard, insertAfter.nextSibling);
+            } else {
+              document.querySelector('main').appendChild(newCard);
+            }
+            insertAfter = newCard;
+
+            var newDetails = newCard.querySelector('details[data-project]');
+            if (newDetails) {
+              if (applyOpenState(newDetails, p.name, states)) statesChanged = true;
+              attachToggleListener(newDetails, p.name);
+            }
+          }
+        }
+
+        if (statesChanged) saveProjectStates(states);
+
+        // Remove stale project cards
+        var existingDetails = document.querySelectorAll('details[data-project]');
+        for (var k = 0; k < existingDetails.length; k++) {
+          var detailName = existingDetails[k].getAttribute('data-project');
+          if (!projectNames[detailName]) {
+            var card = existingDetails[k].closest('.project-card');
+            if (card) {
+              card.parentNode.removeChild(card);
+            } else {
+              existingDetails[k].parentNode.removeChild(existingDetails[k]);
+            }
+          }
+        }
+      }
+
+      fetchDashboard();
+    }
+
+    // Project expand/collapse persistence (non-dashboard pages; dashboard is handled by patchDashboard)
+    if (!livePage || livePage.dataset.livePage !== 'dashboard') {
+      var details = document.querySelectorAll("details[data-project]");
+      var states = loadProjectStates();
+      var changed = false;
+
+      details.forEach(function (el) {
+        var name = el.getAttribute("data-project");
+        if (Object.prototype.hasOwnProperty.call(states, name)) {
+          el.open = states[name];
+        } else {
+          el.open = true;
+          states[name] = true;
+          changed = true;
+        }
+        el.addEventListener("toggle", function () {
+          var s = loadProjectStates();
+          s[name] = el.open;
+          saveProjectStates(s);
+        });
       });
-    });
-    if (changed) saveProjectStates(states);
+      if (changed) saveProjectStates(states);
+    }
   });
 })();

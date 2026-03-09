@@ -186,6 +186,20 @@ func TestWebDashboardProjectDataAttribute(t *testing.T) {
 	}
 }
 
+// TestWebDashboardLivePageAttribute checks that the dashboard renders the data-live-page="dashboard" marker.
+func TestWebDashboardLivePageAttribute(t *testing.T) {
+	srv, _ := newTestServer(t)
+	cookie := loginWeb(t, srv)
+
+	w := webRequest(t, srv, "GET", "/", "", cookie)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), `data-live-page="dashboard"`) {
+		t.Errorf("expected data-live-page=\"dashboard\" attribute in dashboard body")
+	}
+}
+
 // TestWebLogout checks that logout clears the session and redirects to /login.
 func TestWebLogout(t *testing.T) {
 	srv, _ := newTestServer(t)
