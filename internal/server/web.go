@@ -380,6 +380,7 @@ type featureDetailPageData struct {
 	basePageData
 	ProjectName        string
 	Feature            featureRowData
+	DirectToBead       bool
 	InitialDescription string
 	CurrentDescription string
 	LatestQuestions    string
@@ -471,6 +472,7 @@ func buildFeatureDetailData(st Store, monitor *BeadMonitor, projectName, feature
 			Status:    detail.Status.String(),
 			UpdatedAt: detail.UpdatedAt.Format("2006-01-02 15:04"),
 		},
+		DirectToBead:       detail.DirectToBead,
 		InitialDescription: detail.InitialDescription,
 		CurrentDescription: currentDesc,
 		LatestQuestions:    latestQuestions,

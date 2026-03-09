@@ -1081,3 +1081,103 @@ func TestWebDashboardBeadInfoPreserved(t *testing.T) {
 		t.Errorf("expected Bead Feature in dashboard body")
 	}
 }
+
+// TestWebNewFeatureFormHasDirectToBeadCheckbox checks that the new feature form includes the checkbox.
+func TestWebNewFeatureFormHasDirectToBeadCheckbox(t *testing.T) {
+	srv, st := newTestServer(t)
+	cookie := loginWeb(t, srv)
+
+	_, err := st.CreateProject("dtb-form-project", "tok-dtb-form")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	w := webRequest(t, srv, "GET", "/project/dtb-form-project/new", "", cookie)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, `name="direct_to_bead"`) {
+		t.Errorf("expected direct_to_bead checkbox in new feature form")
+	}
+	if !strings.Contains(body, "Direct to bead") {
+		t.Errorf("expected 'Direct to bead' label text in new feature form")
+	}
+}
+
+// TestWebFeatureDetailShowsDirectToBead checks that the detail page shows "Direct to bead" when set.
+func TestWebFeatureDetailShowsDirectToBead(t *testing.T) {
+	srv, st := newTestServer(t)
+	cookie := loginWeb(t, srv)
+
+	_, err := st.CreateProject("dtb-detail-project", "tok-dtb-detail")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := st.CreateFeature("dtb-detail-project", "DTB Feature", "Description.", true, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	w := webRequest(t, srv, "GET", "/project/dtb-detail-project/feature/"+f.ID, "", cookie)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "Direct to bead") {
+		t.Errorf("expected 'Direct to bead' text in feature detail page when DirectToBead=true")
+	}
+}
+
+// TestWebFeatureDetailNoDirectToBeadWhenFalse checks that the detail page omits "Direct to bead" when not set.
+func TestWebFeatureDetailNoDirectToBeadWhenFalse(t *testing.T) {
+	srv, st := newTestServer(t)
+	cookie := loginWeb(t, srv)
+
+	_, err := st.CreateProject("no-dtb-project", "tok-no-dtb")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := st.CreateFeature("no-dtb-project", "Normal Feature", "Description.", false, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	w := webRequest(t, srv, "GET", "/project/no-dtb-project/feature/"+f.ID, "", cookie)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	if strings.Contains(w.Body.String(), "Direct to bead") {
+		t.Errorf("expected no 'Direct to bead' text in feature detail page when DirectToBead=false")
+	}
+}
+
+// TestWebCreateFeatureWithDirectToBead checks that the web form correctly passes direct_to_bead.
+func TestWebCreateFeatureWithDirectToBead(t *testing.T) {
+	srv, st := newTestServer(t)
+	cookie := loginWeb(t, srv)
+
+	_, err := st.CreateProject("dtb-create-project", "tok-dtb-create")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	body := url.Values{
+		"name":           {"DTB Feature"},
+		"description":    {"Some description."},
+		"direct_to_bead": {"true"},
+	}.Encode()
+	w := webRequest(t, srv, "POST", "/project/dtb-create-project/features", body, cookie)
+	if w.Code != http.StatusFound {
+		t.Fatalf("expected 302 redirect, got %d", w.Code)
+	}
+	loc := w.Header().Get("Location")
+
+	// Follow redirect and verify "Direct to bead" appears on the detail page.
+	w2 := webRequest(t, srv, "GET", loc, "", cookie)
+	if w2.Code != http.StatusOK {
+		t.Fatalf("expected 200 for feature detail, got %d", w2.Code)
+	}
+	if !strings.Contains(w2.Body.String(), "Direct to bead") {
+		t.Errorf("expected 'Direct to bead' text after creating feature with direct_to_bead=true")
+	}
+}
