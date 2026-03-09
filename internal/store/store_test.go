@@ -202,8 +202,29 @@ func TestCreateFeatureDirectToBeadFalseIgnoresGenerateAfter(t *testing.T) {
 	if f.Status != model.StatusDraft {
 		t.Errorf("expected draft, got %v", f.Status)
 	}
+	if f.DirectToBead {
+		t.Error("expected DirectToBead=false")
+	}
 	if f.GenerateAfter != "" {
 		t.Errorf("expected empty GenerateAfter, got %q", f.GenerateAfter)
+	}
+}
+
+func TestCreateFeature_DirectToBead_WritesDescriptionV0(t *testing.T) {
+	s := newTestStore(t)
+	if _, err := s.CreateProject("p", "tok"); err != nil {
+		t.Fatal(err)
+	}
+	f, err := s.CreateFeature("p", "feat", "hello direct to bead", true, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	content, err := s.ReadDescriptionVersion("p", f.ID, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if content != "hello direct to bead" {
+		t.Errorf("description_v0.md: got %q, want %q", content, "hello direct to bead")
 	}
 }
 
@@ -955,6 +976,45 @@ func TestPersistenceFeatures(t *testing.T) {
 	}
 	if content != "initial desc" {
 		t.Errorf("description_v0: got %q", content)
+	}
+}
+
+func TestPersistenceDirectToBead(t *testing.T) {
+	dir, err := os.MkdirTemp("", "bm-persist-dtb-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+
+	s1, err := New(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s1.CreateProject("proj", "tok"); err != nil {
+		t.Fatal(err)
+	}
+	f, err := s1.CreateFeature("proj", "dtb-feat", "desc", true, "dep-id")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Reload from disk
+	s2, err := New(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := s2.GetFeature("proj", f.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != model.StatusWaiting {
+		t.Errorf("status after reload: got %v, want waiting", got.Status)
+	}
+	if !got.DirectToBead {
+		t.Error("DirectToBead not persisted: got false, want true")
+	}
+	if got.GenerateAfter != "dep-id" {
+		t.Errorf("GenerateAfter after reload: got %q, want %q", got.GenerateAfter, "dep-id")
 	}
 }
 
