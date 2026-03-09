@@ -88,6 +88,7 @@ type breadcrumb struct {
 // basePageData holds fields required by the base template (embedded in all page data structs).
 type basePageData struct {
 	Breadcrumbs []breadcrumb
+	IsViewer    bool
 }
 
 
@@ -262,8 +263,9 @@ func handleWebDashboard(st Store, monitor *BeadMonitor) http.HandlerFunc {
 		}
 
 		tmpl.Execute(w, dashboardPageData{
-			Projects:   dashProjects,
-			NewProject: newProj,
+			basePageData: basePageData{IsViewer: roleFromContext(r.Context()) == RoleViewer},
+			Projects:     dashProjects,
+			NewProject:   newProj,
 		})
 	}
 }
@@ -334,11 +336,14 @@ func handleWebNewFeature(st Store) http.HandlerFunc {
 			return
 		}
 		tmpl.Execute(w, newFeaturePageData{
-			basePageData: basePageData{Breadcrumbs: []breadcrumb{
-				{Label: "Dashboard", URL: "/"},
-				{Label: projectName},
-				{Label: "New Feature"},
-			}},
+			basePageData: basePageData{
+				Breadcrumbs: []breadcrumb{
+					{Label: "Dashboard", URL: "/"},
+					{Label: projectName},
+					{Label: "New Feature"},
+				},
+				IsViewer: roleFromContext(r.Context()) == RoleViewer,
+			},
 			ProjectName: projectName,
 		})
 	}
@@ -499,6 +504,7 @@ func handleWebFeature(st Store, monitor *BeadMonitor) http.HandlerFunc {
 			http.NotFound(w, r)
 			return
 		}
+		data.IsViewer = roleFromContext(r.Context()) == RoleViewer
 		tmpl.Execute(w, data)
 	}
 }

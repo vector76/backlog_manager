@@ -1750,3 +1750,29 @@ func TestNoSessionBlockedFromMutatingRoutes(t *testing.T) {
 		}
 	}
 }
+
+// TestViewerBadgeShownForViewerSession checks that the "View Only" badge appears in the dashboard for a viewer session.
+func TestViewerBadgeShownForViewerSession(t *testing.T) {
+	srv, _ := newTestServerWithViewer(t)
+	cookie := loginWebAsViewer(t, srv)
+	w := webRequest(t, srv, "GET", "/", "", cookie)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "View Only") {
+		t.Errorf("expected 'View Only' badge in viewer session dashboard, got body: %s", w.Body.String())
+	}
+}
+
+// TestViewerBadgeAbsentForAdminSession checks that the "View Only" badge does NOT appear in the dashboard for an admin session.
+func TestViewerBadgeAbsentForAdminSession(t *testing.T) {
+	srv, _ := newTestServerWithViewer(t)
+	cookie := loginWeb(t, srv)
+	w := webRequest(t, srv, "GET", "/", "", cookie)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	if strings.Contains(w.Body.String(), "View Only") {
+		t.Errorf("expected no 'View Only' badge in admin session dashboard")
+	}
+}

@@ -12,6 +12,7 @@
   <a class="brand" href="/">Backlog Manager</a>
   <nav>
     {{block "nav-extra" .}}{{end}}
+    {{if .IsViewer}}<span class="viewer-badge">View Only</span>{{end}}
     <a href="/logout">Logout</a>
     <button class="theme-btn" id="theme-toggle" title="Toggle theme">🌙</button>
   </nav>
