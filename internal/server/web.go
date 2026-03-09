@@ -112,7 +112,7 @@ func handleWebLogin(sessions *sessionStore, dashUser, dashPass string) http.Hand
 				tmpl.Execute(w, loginPageData{Error: "invalid username or password"})
 				return
 			}
-			id, err := sessions.create()
+			id, err := sessions.create(RoleAdmin)
 			if err != nil {
 				tmpl.Execute(w, loginPageData{Error: "internal error"})
 				return
