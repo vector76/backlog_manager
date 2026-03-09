@@ -44,6 +44,7 @@ func newServeCmd() *cobra.Command {
 
 			if monitor != nil {
 				monitor.Start()
+				defer monitor.Stop()
 				log.Printf("bead monitor started, polling %s every %s", cfg.BeadsServerURL, beadPollInterval)
 			}
 			log.Printf("starting server on %s", srv.Addr)
