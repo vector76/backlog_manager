@@ -175,6 +175,39 @@ func (c *Client) Poll() (map[string]any, error) {
 	return result, nil
 }
 
+// Claim calls GET /api/v1/claim and returns the action JSON on work available (with the feature
+// atomically claimed), or nil on timeout (204).
+func (c *Client) Claim() (map[string]any, error) {
+	req, err := http.NewRequest("GET", c.BaseURL+"/api/v1/claim", nil)
+	if err != nil {
+		return nil, fmt.Errorf("build request: %w", err)
+	}
+	if c.Token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.Token)
+	}
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNoContent {
+		return nil, nil
+	}
+	if resp.StatusCode != http.StatusOK {
+		var errResp map[string]string
+		json.NewDecoder(resp.Body).Decode(&errResp)
+		if msg, ok := errResp["error"]; ok {
+			return nil, fmt.Errorf("server error (%d): %s", resp.StatusCode, msg)
+		}
+		return nil, fmt.Errorf("unexpected status: %d", resp.StatusCode)
+	}
+	var result map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
+	}
+	return result, nil
+}
+
 // FetchPending calls GET /api/v1/features/{id}/pending and returns the parsed response.
 func (c *Client) FetchPending(featureID string) (map[string]any, error) {
 	req, err := http.NewRequest("GET", c.BaseURL+"/api/v1/features/"+featureID+"/pending", nil)

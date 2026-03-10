@@ -54,6 +54,7 @@ type Store interface {
 	DeleteFeature(projectName, featureID string) error
 	TransitionStatus(projectName, featureID string, newStatus model.FeatureStatus) error
 	WriteArtifact(projectName, featureID, name, content string) error
+	ClaimFeature(projectName string) (*model.Feature, model.FeatureAction, error)
 }
 
 type contextKey string
@@ -108,6 +109,7 @@ func New(cfg *config.Config, st Store, monitors ...*BeadMonitor) (*http.Server, 
 		r.Get("/api/v1/features", handleListClientFeatures(st))
 		r.Get("/api/v1/features/{id}", handleGetClientFeature(st))
 		r.Get("/api/v1/poll", handlePoll(st, hub))
+		r.Get("/api/v1/claim", handleClaim(st, hub))
 		r.Get("/api/v1/features/{id}/pending", handleGetPending(st))
 		r.Post("/api/v1/features/{id}/submit-dialog", handleSubmitDialog(st, hub))
 		r.Post("/api/v1/features/{id}/start-generate", handleStartGenerate(st, hub))
@@ -611,6 +613,7 @@ func handleAbandonFeature(st Store, hub *NotifyHub) http.HandlerFunc {
 			return
 		}
 		f.Status = model.StatusAbandoned
+		f.ClaimedAt = nil
 		if err := st.UpdateFeature(f); err != nil {
 			writeError(w, http.StatusInternalServerError, "internal error")
 			return
@@ -772,19 +775,28 @@ type pollResponse struct {
 	DirectToBead bool   `json:"direct_to_bead,omitempty"`
 }
 
-// findActionableFeature returns the first feature in awaiting_client or ready_to_generate status.
+// findActionableFeature returns the first feature in awaiting_client or ready_to_generate status
+// that is not currently claimed (or whose claim has expired).
 func findActionableFeature(st Store, projectName string) (model.Feature, model.FeatureAction, bool) {
 	features, err := st.ListFeatures(projectName, nil)
 	if err != nil {
 		return model.Feature{}, 0, false
 	}
+	now := time.Now().UTC()
 	for _, f := range features {
+		var action model.FeatureAction
 		switch f.Status {
 		case model.StatusAwaitingClient:
-			return f, model.ActionDialogStep, true
+			action = model.ActionDialogStep
 		case model.StatusReadyToGenerate:
-			return f, model.ActionGenerate, true
+			action = model.ActionGenerate
+		default:
+			continue
 		}
+		if f.ClaimedAt != nil && now.Sub(*f.ClaimedAt) < store.ClaimTTL {
+			continue
+		}
+		return f, action, true
 	}
 	return model.Feature{}, 0, false
 }
@@ -818,6 +830,63 @@ func handlePoll(st Store, hub *NotifyHub) http.HandlerFunc {
 
 		for {
 			if feature, action, found := findActionableFeature(st, project.Name); found {
+				resp := pollResponse{
+					Action:      action.String(),
+					FeatureID:   feature.ID,
+					FeatureName: feature.Name,
+				}
+				if action == model.ActionGenerate {
+					resp.DirectToBead = feature.DirectToBead
+				}
+				writeJSON(w, http.StatusOK, resp)
+				return
+			}
+
+			select {
+			case <-ctx.Done():
+				w.WriteHeader(http.StatusNoContent)
+				return
+			case <-ticker.C:
+				// Check again
+			}
+		}
+	}
+}
+
+// handleClaim handles GET /api/v1/claim — long-poll until work is available, then atomically
+// claims the feature before returning. Returns 200 with action JSON; 204 on timeout.
+// Accepts optional ?timeout=N query param (seconds, max 30) for testing.
+func handleClaim(st Store, hub *NotifyHub) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		project, ok := r.Context().Value(projectContextKey).(*model.Project)
+		if !ok || project == nil {
+			writeError(w, http.StatusInternalServerError, "internal error")
+			return
+		}
+
+		st.RecordPoll(project.Name)
+		hub.NotifyDashboard()
+
+		timeout := pollTimeout
+		if q := r.URL.Query().Get("timeout"); q != "" {
+			if secs, err := strconv.Atoi(q); err == nil && secs > 0 && secs <= int(pollTimeout.Seconds()) {
+				timeout = time.Duration(secs) * time.Second
+			}
+		}
+
+		ctx, cancel := context.WithTimeout(r.Context(), timeout)
+		defer cancel()
+
+		ticker := time.NewTicker(500 * time.Millisecond)
+		defer ticker.Stop()
+
+		for {
+			feature, action, err := st.ClaimFeature(project.Name)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "internal error")
+				return
+			}
+			if feature != nil {
 				resp := pollResponse{
 					Action:      action.String(),
 					FeatureID:   feature.ID,

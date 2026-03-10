@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/vector76/backlog_manager/internal/config"
@@ -428,5 +429,93 @@ func TestE2EConnectivity(t *testing.T) {
 	decode(t, resp, &proj)
 	if connectivity, ok := proj["connectivity"].(string); !ok || !strings.HasPrefix(connectivity, "Connected") {
 		t.Errorf("expected connectivity to start with Connected in dashboard view, got %v", proj["connectivity"])
+	}
+}
+
+// claim calls GET /api/v1/claim with timeout=1 and expects a claimed feature (200).
+func (s *e2eServer) claim(t *testing.T) map[string]any {
+	t.Helper()
+	resp := s.do(t, "GET", "/api/v1/claim?timeout=1", nil, s.bearerAuth())
+	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
+		t.Fatalf("claim: expected 200, got %d", resp.StatusCode)
+	}
+	var result map[string]any
+	decode(t, resp, &result)
+	return result
+}
+
+// claimExpectTimeout calls GET /api/v1/claim with timeout=1 and expects 204.
+func (s *e2eServer) claimExpectTimeout(t *testing.T) {
+	t.Helper()
+	resp := s.do(t, "GET", "/api/v1/claim?timeout=1", nil, s.bearerAuth())
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("claim: expected 204 (no work), got %d", resp.StatusCode)
+	}
+}
+
+// TestE2EClaim_Timeout verifies that claim returns 204 when no work is available.
+func TestE2EClaim_Timeout(t *testing.T) {
+	s := newE2EServer(t)
+	s.setupProject(t, "proj")
+	s.claimExpectTimeout(t)
+}
+
+// TestE2EClaim_BasicFlow verifies that claim returns and marks a feature claimed.
+func TestE2EClaim_BasicFlow(t *testing.T) {
+	s := newE2EServer(t)
+	s.setupProject(t, "proj")
+
+	featureID := s.createFeature(t, "proj", "My feature", "desc")
+	s.startDialog(t, "proj", featureID)
+
+	// Claim should return the feature.
+	action := s.claim(t)
+	if action["action"] != "dialog_step" {
+		t.Errorf("expected action=dialog_step, got %v", action["action"])
+	}
+	if action["feature_id"] != featureID {
+		t.Errorf("expected feature_id=%s, got %v", featureID, action["feature_id"])
+	}
+
+	// A second claim call should return nothing (feature is claimed).
+	s.claimExpectTimeout(t)
+
+	// poll also should return nothing (claimed feature is invisible to poll).
+	s.pollExpectTimeout(t)
+}
+
+// TestE2EClaim_ConcurrentOnlyOneWins fires N concurrent claim requests and asserts
+// exactly one succeeds; the rest time out.
+func TestE2EClaim_ConcurrentOnlyOneWins(t *testing.T) {
+	s := newE2EServer(t)
+	s.setupProject(t, "proj")
+
+	featureID := s.createFeature(t, "proj", "My feature", "desc")
+	s.startDialog(t, "proj", featureID)
+
+	n := 5
+	results := make([]int, n) // HTTP status codes
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			resp := s.do(t, "GET", "/api/v1/claim?timeout=1", nil, s.bearerAuth())
+			resp.Body.Close()
+			results[i] = resp.StatusCode
+		}(i)
+	}
+	wg.Wait()
+
+	wins := 0
+	for _, code := range results {
+		if code == http.StatusOK {
+			wins++
+		}
+	}
+	if wins != 1 {
+		t.Errorf("expected exactly 1 claim winner, got %d (results: %v)", wins, results)
 	}
 }

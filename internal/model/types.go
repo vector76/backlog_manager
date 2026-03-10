@@ -24,9 +24,10 @@ type Feature struct {
 	DirectToBead bool `json:"direct_to_bead,omitempty"`
 	// GenerateAfter is the ID of a feature this one depends on (optional).
 	GenerateAfter string `json:"generate_after,omitempty"`
-	BeadIDs       []string  `json:"bead_ids,omitempty"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	BeadIDs   []string   `json:"bead_ids,omitempty"`
+	ClaimedAt *time.Time `json:"claimed_at,omitempty"`
+	CreatedAt time.Time  `json:"created_at"`
+	UpdatedAt time.Time  `json:"updated_at"`
 }
 
 // DialogIteration stores per-round metadata for a feature's dialog.

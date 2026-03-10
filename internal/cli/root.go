@@ -13,6 +13,7 @@ func NewRootCmd() *cobra.Command {
 	root.AddCommand(newFeaturesCmd())
 	root.AddCommand(newShowCmd())
 	root.AddCommand(newPollCmd())
+	root.AddCommand(newClaimCmd())
 	root.AddCommand(newFetchCmd())
 	root.AddCommand(newSubmitCmd())
 	root.AddCommand(newStartGenerateCmd())

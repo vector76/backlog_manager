@@ -4,6 +4,7 @@ import (
 	"os"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/vector76/backlog_manager/internal/model"
 )
@@ -1394,5 +1395,216 @@ func TestRespondToDialogFinalPersistence(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("is_final not persisted after reload: Iterations=%v", got.Iterations)
+	}
+}
+
+// --- ClaimFeature ---
+
+func TestClaimFeature_NoActionable(t *testing.T) {
+	s := newTestStore(t)
+	if _, err := s.CreateProject("p", "tok"); err != nil {
+		t.Fatal(err)
+	}
+	// No features at all: returns nil
+	f, _, err := s.ClaimFeature("p")
+	if err != nil {
+		t.Fatalf("ClaimFeature: %v", err)
+	}
+	if f != nil {
+		t.Errorf("expected nil feature, got %+v", f)
+	}
+}
+
+func TestClaimFeature_AwaitingClient(t *testing.T) {
+	s, feat := setupDialogFeature(t, model.StatusAwaitingClient)
+	f, action, err := s.ClaimFeature("p")
+	if err != nil {
+		t.Fatalf("ClaimFeature: %v", err)
+	}
+	if f == nil {
+		t.Fatal("expected feature, got nil")
+	}
+	if f.ID != feat.ID {
+		t.Errorf("feature ID: got %q, want %q", f.ID, feat.ID)
+	}
+	if action != model.ActionDialogStep {
+		t.Errorf("action: got %v, want dialog_step", action)
+	}
+	if f.ClaimedAt == nil {
+		t.Error("ClaimedAt should be set after claim")
+	}
+}
+
+func TestClaimFeature_ReadyToGenerate(t *testing.T) {
+	s, feat := setupDialogFeature(t, model.StatusReadyToGenerate)
+	f, action, err := s.ClaimFeature("p")
+	if err != nil {
+		t.Fatalf("ClaimFeature: %v", err)
+	}
+	if f == nil {
+		t.Fatal("expected feature, got nil")
+	}
+	if f.ID != feat.ID {
+		t.Errorf("feature ID: got %q, want %q", f.ID, feat.ID)
+	}
+	if action != model.ActionGenerate {
+		t.Errorf("action: got %v, want generate", action)
+	}
+	if f.ClaimedAt == nil {
+		t.Error("ClaimedAt should be set after claim")
+	}
+}
+
+func TestClaimFeature_SkipsClaimed(t *testing.T) {
+	s := newTestStore(t)
+	if _, err := s.CreateProject("p", "tok"); err != nil {
+		t.Fatal(err)
+	}
+	// Create two awaiting_client features.
+	f1, err := s.CreateFeature("p", "feat1", "desc", false, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f2, err := s.CreateFeature("p", "feat2", "desc", false, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Manually put both into awaiting_client.
+	s.mu.Lock()
+	for i := range s.features["p"] {
+		s.features["p"][i].Status = model.StatusAwaitingClient
+	}
+	s.mu.Unlock()
+	if err := s.saveFeatures("p"); err != nil {
+		t.Fatal(err)
+	}
+
+	// First claim should get f1.
+	got1, _, err := s.ClaimFeature("p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got1 == nil || got1.ID != f1.ID {
+		t.Fatalf("first claim: expected %q, got %v", f1.ID, got1)
+	}
+
+	// Second claim should get f2 (f1 is already claimed).
+	got2, _, err := s.ClaimFeature("p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got2 == nil || got2.ID != f2.ID {
+		t.Fatalf("second claim: expected %q, got %v", f2.ID, got2)
+	}
+
+	// Third claim should return nil (both claimed).
+	got3, _, err := s.ClaimFeature("p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got3 != nil {
+		t.Errorf("third claim: expected nil, got %+v", got3)
+	}
+}
+
+func TestClaimFeature_ExpiredClaim(t *testing.T) {
+	s, _ := setupDialogFeature(t, model.StatusAwaitingClient)
+
+	// Set ClaimedAt to an expired time.
+	expired := time.Now().Add(-(ClaimTTL + time.Second))
+	s.mu.Lock()
+	for i := range s.features["p"] {
+		s.features["p"][i].ClaimedAt = &expired
+	}
+	s.mu.Unlock()
+	if err := s.saveFeatures("p"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Claim should succeed because the previous claim has expired.
+	f, _, err := s.ClaimFeature("p")
+	if err != nil {
+		t.Fatalf("ClaimFeature: %v", err)
+	}
+	if f == nil {
+		t.Fatal("expected feature for expired claim, got nil")
+	}
+	if f.ClaimedAt == nil || !f.ClaimedAt.After(expired) {
+		t.Error("ClaimedAt should be updated to a fresh timestamp")
+	}
+}
+
+func TestClaimFeature_ConcurrentOnlyOneWins(t *testing.T) {
+	s, _ := setupDialogFeature(t, model.StatusReadyToGenerate)
+
+	n := 20
+	results := make([]*model.Feature, n)
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			f, _, err := s.ClaimFeature("p")
+			if err != nil {
+				t.Errorf("goroutine %d: ClaimFeature error: %v", i, err)
+				return
+			}
+			results[i] = f
+		}(i)
+	}
+	wg.Wait()
+
+	winners := 0
+	for _, r := range results {
+		if r != nil {
+			winners++
+		}
+	}
+	if winners != 1 {
+		t.Errorf("expected exactly 1 winner, got %d", winners)
+	}
+}
+
+func TestTransitionStatus_ClearsClaimedAt(t *testing.T) {
+	s, feat := setupDialogFeature(t, model.StatusReadyToGenerate)
+
+	// Claim the feature.
+	f, _, err := s.ClaimFeature("p")
+	if err != nil || f == nil {
+		t.Fatalf("ClaimFeature: %v (feature=%v)", err, f)
+	}
+
+	// Transition clears ClaimedAt.
+	if err := s.TransitionStatus("p", feat.ID, model.StatusGenerating); err != nil {
+		t.Fatalf("TransitionStatus: %v", err)
+	}
+	got, err := s.GetFeature("p", feat.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ClaimedAt != nil {
+		t.Errorf("ClaimedAt should be nil after transition, got %v", got.ClaimedAt)
+	}
+}
+
+func TestSubmitClientDialog_ClearsClaimedAt(t *testing.T) {
+	s, feat := setupDialogFeature(t, model.StatusAwaitingClient)
+
+	// Claim the feature.
+	f, _, err := s.ClaimFeature("p")
+	if err != nil || f == nil {
+		t.Fatalf("ClaimFeature: %v (feature=%v)", err, f)
+	}
+
+	// SubmitClientDialog clears ClaimedAt.
+	if err := s.SubmitClientDialog("p", feat.ID, "updated desc", "some questions"); err != nil {
+		t.Fatalf("SubmitClientDialog: %v", err)
+	}
+	got, err := s.GetFeature("p", feat.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ClaimedAt != nil {
+		t.Errorf("ClaimedAt should be nil after SubmitClientDialog, got %v", got.ClaimedAt)
 	}
 }

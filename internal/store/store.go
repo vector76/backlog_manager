@@ -13,6 +13,10 @@ import (
 	"github.com/vector76/backlog_manager/internal/model"
 )
 
+// ClaimTTL is the duration after which an uncompleted claim is considered expired
+// and the feature becomes claimable again.
+const ClaimTTL = 60 * time.Minute
+
 // validTransitions maps each source status to the set of valid target statuses.
 // All statuses may transition to Abandoned or Halted (handled separately).
 var validTransitions = map[model.FeatureStatus]map[model.FeatureStatus]bool{
@@ -47,7 +51,6 @@ var validTransitions = map[model.FeatureStatus]map[model.FeatureStatus]bool{
 	model.StatusAbandoned: {},
 	model.StatusHalted:    {},
 }
-
 
 // projectsRegistry is the JSON structure for projects.json.
 type projectsRegistry struct {
@@ -805,10 +808,13 @@ func (s *Store) TransitionStatus(projectName, featureID string, newStatus model.
 	}
 
 	oldUpdatedAt := s.features[projectName][idx].UpdatedAt
+	oldClaimedAt := s.features[projectName][idx].ClaimedAt
 	s.features[projectName][idx].Status = newStatus
+	s.features[projectName][idx].ClaimedAt = nil
 	s.features[projectName][idx].UpdatedAt = time.Now().UTC()
 	if err := s.saveFeatures(projectName); err != nil {
 		s.features[projectName][idx].Status = current
+		s.features[projectName][idx].ClaimedAt = oldClaimedAt
 		s.features[projectName][idx].UpdatedAt = oldUpdatedAt
 		return err
 	}
@@ -884,6 +890,49 @@ func (s *Store) RecordPoll(projectName string) {
 	s.lastPoll[projectName] = time.Now().UTC()
 }
 
+// ClaimFeature atomically finds the first actionable feature (awaiting_client or
+// ready_to_generate) that is unclaimed or whose claim has expired, claims it by
+// setting ClaimedAt, and returns it along with the action type.
+// Returns nil if no actionable, unclaimed feature is available.
+func (s *Store) ClaimFeature(projectName string) (*model.Feature, model.FeatureAction, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, err := s.getProjectLocked(projectName); err != nil {
+		return nil, 0, err
+	}
+
+	now := time.Now().UTC()
+	for i, f := range s.features[projectName] {
+		var action model.FeatureAction
+		switch f.Status {
+		case model.StatusAwaitingClient:
+			action = model.ActionDialogStep
+		case model.StatusReadyToGenerate:
+			action = model.ActionGenerate
+		default:
+			continue
+		}
+		// Skip if claimed and the claim has not yet expired.
+		if f.ClaimedAt != nil && now.Sub(*f.ClaimedAt) < ClaimTTL {
+			continue
+		}
+		// Atomically claim: set ClaimedAt and persist before returning.
+		oldClaimedAt := s.features[projectName][i].ClaimedAt
+		oldUpdatedAt := s.features[projectName][i].UpdatedAt
+		s.features[projectName][i].ClaimedAt = &now
+		s.features[projectName][i].UpdatedAt = now
+		if err := s.saveFeatures(projectName); err != nil {
+			s.features[projectName][i].ClaimedAt = oldClaimedAt
+			s.features[projectName][i].UpdatedAt = oldUpdatedAt
+			return nil, 0, err
+		}
+		result := s.features[projectName][i]
+		return &result, action, nil
+	}
+	return nil, 0, nil
+}
+
 // GetLastPollTime returns the last poll time for a project and whether it has been polled.
 func (s *Store) GetLastPollTime(projectName string) (time.Time, bool) {
 	s.pollMu.RLock()
@@ -936,12 +985,15 @@ func (s *Store) SubmitClientDialog(projectName, featureID, updatedDescription, q
 	}
 
 	oldUpdatedAt := s.features[projectName][idx].UpdatedAt
+	oldClaimedAt := s.features[projectName][idx].ClaimedAt
 	s.features[projectName][idx].CurrentIteration = newRound
 	s.features[projectName][idx].Status = newStatus
+	s.features[projectName][idx].ClaimedAt = nil
 	s.features[projectName][idx].UpdatedAt = time.Now().UTC()
 	if err := s.saveFeatures(projectName); err != nil {
 		s.features[projectName][idx].CurrentIteration = oldIteration
 		s.features[projectName][idx].Status = current
+		s.features[projectName][idx].ClaimedAt = oldClaimedAt
 		s.features[projectName][idx].UpdatedAt = oldUpdatedAt
 		return err
 	}

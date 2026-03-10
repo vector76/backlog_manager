@@ -50,6 +50,45 @@ func newPollCmd() *cobra.Command {
 	return cmd
 }
 
+func newClaimCmd() *cobra.Command {
+	var timeoutSec int
+	cmd := &cobra.Command{
+		Use:   "claim",
+		Short: "Block until work is available, atomically claim it, then print action JSON to stdout",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c := client.New()
+			if c.Token == "" {
+				return fmt.Errorf("BM_TOKEN is required (set env var or .env file)")
+			}
+			var deadline time.Time
+			if timeoutSec > 0 {
+				deadline = time.Now().Add(time.Duration(timeoutSec) * time.Second)
+			}
+			// Loop until a feature is claimed (server returns 204 on timeout; client retries).
+			for {
+				result, err := c.Claim()
+				if err != nil {
+					return err
+				}
+				if result != nil {
+					enc := json.NewEncoder(cmd.OutOrStdout())
+					enc.SetIndent("", "  ")
+					return enc.Encode(result)
+				}
+				// 204 timeout: server found no work; check deadline then retry.
+				if timeoutSec > 0 && time.Now().After(deadline) {
+					enc := json.NewEncoder(cmd.OutOrStdout())
+					enc.SetIndent("", "  ")
+					enc.Encode(map[string]any{"action": "timeout"})
+					return fmt.Errorf("claim timed out after %d seconds", timeoutSec)
+				}
+			}
+		},
+	}
+	cmd.Flags().IntVar(&timeoutSec, "timeout", 300, "Seconds to wait for work before giving up (0 = no timeout, default 300)")
+	return cmd
+}
+
 func newFetchCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "fetch <feature-id>",
