@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/yuin/goldmark"
@@ -218,10 +219,11 @@ func buildDashboardData(st Store, monitor *BeadMonitor) []projectDashData {
 		rows := make([]featureRowData, 0, len(allFeatures))
 		for _, f := range allFeatures {
 			row := featureRowData{
-				ID:        f.ID,
-				Name:      f.Name,
-				Status:    f.Status.String(),
-				UpdatedAt: f.UpdatedAt.Format("2006-01-02 15:04"),
+				ID:           f.ID,
+				Name:         f.Name,
+				Status:       f.Status.String(),
+				UpdatedAt:    f.UpdatedAt.Format("2006-01-02 15:04 UTC"),
+				UpdatedAtISO: f.UpdatedAt.Format(time.RFC3339),
 			}
 			if f.Status == model.StatusBeadsCreated && monitor != nil {
 				row.BeadInfo = beadInfoString(f.ID, monitor)
@@ -298,11 +300,12 @@ func handleWebCreateProject(st Store) http.HandlerFunc {
 // --- Feature handlers ---
 
 type featureRowData struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	Status    string `json:"status"`
-	UpdatedAt string `json:"updated_at"`
-	BeadInfo  string `json:"bead_info,omitempty"` // e.g. "3/7 beads closed" for beads_created features; empty otherwise
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	Status       string `json:"status"`
+	UpdatedAt    string `json:"updated_at"`
+	UpdatedAtISO string `json:"updated_at_iso"`
+	BeadInfo     string `json:"bead_info,omitempty"` // e.g. "3/7 beads closed" for beads_created features; empty otherwise
 }
 
 // beadInfoString returns a human-readable progress string for a feature's beads.
@@ -479,10 +482,11 @@ func buildFeatureDetailData(st Store, monitor *BeadMonitor, projectName, feature
 		}},
 		ProjectName: projectName,
 		Feature: featureRowData{
-			ID:        detail.ID,
-			Name:      detail.Name,
-			Status:    detail.Status.String(),
-			UpdatedAt: detail.UpdatedAt.Format("2006-01-02 15:04"),
+			ID:           detail.ID,
+			Name:         detail.Name,
+			Status:       detail.Status.String(),
+			UpdatedAt:    detail.UpdatedAt.Format("2006-01-02 15:04 UTC"),
+			UpdatedAtISO: detail.UpdatedAt.Format(time.RFC3339),
 		},
 		DirectToBead:       detail.DirectToBead,
 		InitialDescription: detail.InitialDescription,

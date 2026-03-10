@@ -393,3 +393,51 @@ func TestPollNotifiesDashboard(t *testing.T) {
 		t.Fatal("timeout: poll did not notify dashboard hub")
 	}
 }
+
+// TestHandleDashboardDataUpdatedAtISO checks that the /data endpoint includes
+// updated_at_iso (ISO 8601) alongside updated_at for each feature row.
+func TestHandleDashboardDataUpdatedAtISO(t *testing.T) {
+	srv, st := newTestServer(t)
+	cookie := loginWeb(t, srv)
+
+	_, err := st.CreateProject("iso-project", "tok-iso")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = st.CreateFeature("iso-project", "ISO Feature", "desc", false, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	w := webRequest(t, srv, "GET", "/data", "", cookie)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	var resp struct {
+		Projects []struct {
+			Features []struct {
+				UpdatedAt    string `json:"updated_at"`
+				UpdatedAtISO string `json:"updated_at_iso"`
+			} `json:"features"`
+		} `json:"projects"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(resp.Projects) == 0 || len(resp.Projects[0].Features) == 0 {
+		t.Fatal("expected at least one feature in response")
+	}
+	f := resp.Projects[0].Features[0]
+	if f.UpdatedAtISO == "" {
+		t.Error("expected non-empty updated_at_iso in /data response")
+	}
+	// Must be parseable as RFC3339.
+	if _, err := time.Parse(time.RFC3339, f.UpdatedAtISO); err != nil {
+		t.Errorf("updated_at_iso %q is not valid RFC3339: %v", f.UpdatedAtISO, err)
+	}
+	// Display string should contain "UTC" suffix.
+	if !strings.Contains(f.UpdatedAt, "UTC") {
+		t.Errorf("expected updated_at to contain 'UTC', got %q", f.UpdatedAt)
+	}
+}

@@ -5,7 +5,7 @@
   <div>
     <h1 style="margin-bottom:0.25rem">{{.Feature.Name}}</h1>
     <span class="badge {{statusBadgeClass .Feature.Status}}">{{statusLabel .Feature.Status}}</span>
-    <span class="muted" style="font-size:0.85rem;margin-left:0.5rem">updated {{.Feature.UpdatedAt}}</span>
+    <span class="muted" style="font-size:0.85rem;margin-left:0.5rem">updated <time class="local-time" datetime="{{.Feature.UpdatedAtISO}}">{{.Feature.UpdatedAt}}</time></span>
     {{if not .IsViewer}}
     <details style="margin-top:0.5rem">
       <summary style="cursor:pointer;font-size:0.9rem">Edit title</summary>

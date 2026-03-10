@@ -1859,3 +1859,59 @@ func TestAdminFeaturePageShowsActionControls(t *testing.T) {
 		t.Errorf("admin feature page should contain 'Start Dialog'")
 	}
 }
+
+// TestWebDashboardLocalTimeElement checks that feature rows on the dashboard
+// include a <time class="local-time"> element with an ISO 8601 datetime attribute.
+func TestWebDashboardLocalTimeElement(t *testing.T) {
+	srv, st := newTestServer(t)
+	cookie := loginWeb(t, srv)
+
+	_, err := st.CreateProject("lt-project", "tok-lt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = st.CreateFeature("lt-project", "LT Feature", "desc", false, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	w := webRequest(t, srv, "GET", "/", "", cookie)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, `<time class="local-time"`) {
+		t.Errorf("expected <time class=\"local-time\"> element in dashboard body")
+	}
+	if !strings.Contains(body, `datetime="20`) {
+		t.Errorf("expected datetime attribute with ISO timestamp in dashboard body")
+	}
+}
+
+// TestWebFeatureDetailLocalTimeElement checks that the feature detail page
+// includes a <time class="local-time"> element with an ISO 8601 datetime attribute.
+func TestWebFeatureDetailLocalTimeElement(t *testing.T) {
+	srv, st := newTestServer(t)
+	cookie := loginWeb(t, srv)
+
+	_, err := st.CreateProject("lt-feat-project", "tok-lt2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := st.CreateFeature("lt-feat-project", "LT Detail Feature", "desc", false, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	w := webRequest(t, srv, "GET", "/project/lt-feat-project/feature/"+f.ID, "", cookie)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, `<time class="local-time"`) {
+		t.Errorf("expected <time class=\"local-time\"> element in feature detail body")
+	}
+	if !strings.Contains(body, `datetime="20`) {
+		t.Errorf("expected datetime attribute with ISO timestamp in feature detail body")
+	}
+}

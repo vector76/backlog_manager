@@ -68,7 +68,7 @@
               <span class="badge {{statusBadgeClass .Status}}">{{statusLabel .Status}}</span>
               {{if .BeadInfo}}<span class="muted" style="font-size:0.8rem;margin-left:0.4rem">{{.BeadInfo}}</span>{{end}}
             </td>
-            <td class="muted" style="font-size:0.85rem;white-space:nowrap">{{.UpdatedAt}}</td>
+            <td class="muted" style="font-size:0.85rem;white-space:nowrap"><time class="local-time" datetime="{{.UpdatedAtISO}}">{{.UpdatedAt}}</time></td>
           </tr>
           {{end}}
         </tbody>
