@@ -115,6 +115,37 @@
         .replace(/"/g, '&quot;');
     }
 
+    function formatLocalTime(isoString) {
+      try {
+        var d = new Date(isoString);
+        var fmt = new Intl.DateTimeFormat(undefined, {
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: false,
+          timeZoneName: 'short'
+        });
+        var parts = fmt.formatToParts(d);
+        var p = {};
+        for (var i = 0; i < parts.length; i++) {
+          p[parts[i].type] = parts[i].value;
+        }
+        return p.year + '-' + p.month + '-' + p.day + ' ' + p.hour + ':' + p.minute + ' ' + p.timeZoneName;
+      } catch (e) {
+        return null;
+      }
+    }
+
+    function applyLocalTimes(container) {
+      var els = container.querySelectorAll('time.local-time');
+      for (var i = 0; i < els.length; i++) {
+        var formatted = formatLocalTime(els[i].getAttribute('datetime'));
+        if (formatted !== null) els[i].textContent = formatted;
+      }
+    }
+
     // Live page detection
     var livePage = document.querySelector('[data-live-page]');
 
@@ -391,7 +422,7 @@
           rows += '<tr>' +
             '<td><a href="/project/' + proj + '/feature/' + escHTML(f.id) + '">' + escHTML(f.name) + '</a></td>' +
             '<td><span class="badge ' + escHTML(statusBadgeClass(f.status)) + '">' + escHTML(statusLabel(f.status)) + '</span>' + beadHTML + '</td>' +
-            '<td class="muted" style="font-size:0.85rem;white-space:nowrap">' + escHTML(f.updated_at) + '</td>' +
+            '<td class="muted" style="font-size:0.85rem;white-space:nowrap"><time class="local-time" datetime="' + escHTML(f.updated_at_iso) + '">' + escHTML(f.updated_at) + '</time></td>' +
             '</tr>';
         }
         return '<div class="project-body"><table class="feature-table"><thead><tr><th>Name</th><th>Status</th><th>Updated</th></tr></thead><tbody>' + rows + '</tbody></table></div>';
@@ -449,6 +480,7 @@
             } else {
               el.appendChild(newBodyEl);
             }
+            applyLocalTimes(newBodyEl);
 
             // Update connectivity badge in summary
             var connSpan = el.querySelector('summary .connectivity');
@@ -497,6 +529,7 @@
               document.querySelector('main').appendChild(newCard);
             }
             insertAfter = newCard;
+            applyLocalTimes(newCard);
 
             var newDetails = newCard.querySelector('details[data-project]');
             if (newDetails) {
@@ -525,6 +558,13 @@
 
       fetchDashboard();
     }
+
+    // Format local-time elements on initial page load
+    document.querySelectorAll('time.local-time').forEach(function (el) {
+      var iso = el.getAttribute('datetime');
+      var formatted = formatLocalTime(iso);
+      if (formatted !== null) el.textContent = formatted;
+    });
 
     // Project expand/collapse persistence (non-dashboard pages; dashboard is handled by patchDashboard)
     if (!livePage || livePage.dataset.livePage !== 'dashboard') {
