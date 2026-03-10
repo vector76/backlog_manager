@@ -1915,3 +1915,120 @@ func TestWebFeatureDetailLocalTimeElement(t *testing.T) {
 		t.Errorf("expected datetime attribute with ISO timestamp in feature detail body")
 	}
 }
+
+// TestWebDashboardTimestampRFC3339 checks that the dashboard <time> element has a
+// datetime attribute that parses as RFC3339 and visible text that ends with " UTC".
+func TestWebDashboardTimestampRFC3339(t *testing.T) {
+	srv, st := newTestServer(t)
+	cookie := loginWeb(t, srv)
+
+	_, err := st.CreateProject("rfc-dash-project", "tok-rfc-d")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = st.CreateFeature("rfc-dash-project", "RFC Dash Feature", "desc", false, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	w := webRequest(t, srv, "GET", "/", "", cookie)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	body := w.Body.String()
+
+	const prefix = `<time class="local-time" datetime="`
+	idx := strings.Index(body, prefix)
+	if idx == -1 {
+		t.Fatal(`expected <time class="local-time" datetime="..."> in dashboard body`)
+	}
+	rest := body[idx+len(prefix):]
+	end := strings.IndexByte(rest, '"')
+	if end == -1 {
+		t.Fatal("malformed datetime attribute in dashboard body")
+	}
+	datetimeVal := rest[:end]
+	if _, err := time.Parse(time.RFC3339, datetimeVal); err != nil {
+		t.Errorf("datetime attribute %q is not valid RFC3339: %v", datetimeVal, err)
+	}
+
+	if !strings.Contains(body, "UTC</time>") {
+		t.Errorf("expected visible text ending with 'UTC' inside <time> element in dashboard body")
+	}
+}
+
+// TestWebFeatureDetailTimestampRFC3339 checks that the feature detail <time> element has a
+// datetime attribute that parses as RFC3339 and visible text that ends with " UTC".
+func TestWebFeatureDetailTimestampRFC3339(t *testing.T) {
+	srv, st := newTestServer(t)
+	cookie := loginWeb(t, srv)
+
+	_, err := st.CreateProject("rfc-feat-project", "tok-rfc-f")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := st.CreateFeature("rfc-feat-project", "RFC Feat Feature", "desc", false, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	w := webRequest(t, srv, "GET", "/project/rfc-feat-project/feature/"+f.ID, "", cookie)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	body := w.Body.String()
+
+	const prefix = `<time class="local-time" datetime="`
+	idx := strings.Index(body, prefix)
+	if idx == -1 {
+		t.Fatal(`expected <time class="local-time" datetime="..."> in feature detail body`)
+	}
+	rest := body[idx+len(prefix):]
+	end := strings.IndexByte(rest, '"')
+	if end == -1 {
+		t.Fatal("malformed datetime attribute in feature detail body")
+	}
+	datetimeVal := rest[:end]
+	if _, err := time.Parse(time.RFC3339, datetimeVal); err != nil {
+		t.Errorf("datetime attribute %q is not valid RFC3339: %v", datetimeVal, err)
+	}
+
+	if !strings.Contains(body, "UTC</time>") {
+		t.Errorf("expected visible text ending with 'UTC' inside <time> element in feature detail body")
+	}
+}
+
+// TestTimestampFormatMidnightUTC confirms the format strings used in web.go produce correct
+// output for a feature whose UpdatedAt is exactly at midnight UTC.
+func TestTimestampFormatMidnightUTC(t *testing.T) {
+	midnight := time.Date(2026, 3, 10, 0, 0, 0, 0, time.UTC)
+
+	isoStr := midnight.Format(time.RFC3339)
+	if isoStr != "2026-03-10T00:00:00Z" {
+		t.Errorf("expected '2026-03-10T00:00:00Z', got %q", isoStr)
+	}
+	if _, err := time.Parse(time.RFC3339, isoStr); err != nil {
+		t.Errorf("midnight UTC ISO string %q does not parse as RFC3339: %v", isoStr, err)
+	}
+
+	displayStr := midnight.Format("2006-01-02 15:04 UTC")
+	if !strings.HasSuffix(displayStr, " UTC") {
+		t.Errorf("expected display string to end with ' UTC', got %q", displayStr)
+	}
+}
+
+// TestTimestampFormatZeroTime confirms the format strings used in web.go do not panic and
+// produce well-defined output for a feature whose UpdatedAt is Go's zero time.
+func TestTimestampFormatZeroTime(t *testing.T) {
+	var zero time.Time
+
+	isoStr := zero.Format(time.RFC3339)
+	if isoStr == "" {
+		t.Error("expected non-empty ISO string for zero time")
+	}
+
+	displayStr := zero.Format("2006-01-02 15:04 UTC")
+	if !strings.HasSuffix(displayStr, " UTC") {
+		t.Errorf("expected display string to end with ' UTC' for zero time, got %q", displayStr)
+	}
+}
