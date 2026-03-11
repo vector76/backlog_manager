@@ -1,7 +1,7 @@
 {{template "base" .}}
 {{define "title"}}{{.Feature.Name}} - {{.ProjectName}} - Backlog Manager{{end}}
 {{define "content"}}
-<div class="flex-row" data-live-page="feature" data-project="{{.ProjectName}}" data-feature-id="{{.Feature.ID}}" style="margin-bottom:1rem">
+<div class="flex-row" data-live-page="feature" data-project="{{.ProjectName}}" data-feature-id="{{.Feature.ID}}" data-is-viewer="{{.IsViewer}}" style="margin-bottom:1rem">
   <div>
     <h1 style="margin-bottom:0.25rem">{{.Feature.Name}}</h1>
     <span class="badge {{statusBadgeClass .Feature.Status}}">{{statusLabel .Feature.Status}}</span>

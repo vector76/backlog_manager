@@ -154,6 +154,7 @@
     if (livePage && livePage.dataset.livePage === 'feature') {
       var projectName = livePage.dataset.project;
       var featureID = livePage.dataset.featureId;
+      var isViewer = livePage.dataset.isViewer === 'true';
 
       var liveStatus = document.getElementById('live-status');
       var secondsAgo = 0;
@@ -196,6 +197,7 @@
         var s = data.status;
 
         if (s === 'draft') {
+          if (isViewer) return '';
           return '<div class="card"><h2>Actions</h2>' +
             '<details style="margin-bottom:1rem"><summary style="cursor:pointer;font-weight:600">Edit Description</summary>' +
             '<form method="post" action="' + base + '/description" style="margin-top:0.75rem">' +
@@ -219,6 +221,9 @@
               '<div class="md-content"><pre style="white-space:pre-wrap;margin:0">' + escHTML(last.questions) + '</pre></div>' +
               '</div>';
           }
+          if (isViewer) {
+            return '<div class="card"><h2>Respond to Client</h2>' + questionsHTML + '</div>';
+          }
           return '<div class="card"><h2>Respond to Client</h2>' + questionsHTML +
             '<form method="post" action="' + base + '/respond">' +
             '<div style="margin-bottom:0.75rem">' +
@@ -238,6 +243,19 @@
         }
 
         if (s === 'fully_specified') {
+          if (isViewer) return '';
+          var otherFeatures = data.other_features || [];
+          var genAfterHTML = '';
+          if (otherFeatures.length > 0) {
+            var opts = '<option value="">Generate After&hellip;</option>';
+            for (var i = 0; i < otherFeatures.length; i++) {
+              var f = otherFeatures[i];
+              opts += '<option value="' + escHTML(f.id) + '">' + escHTML(f.name) + ' (' + escHTML(f.id) + ')</option>';
+            }
+            genAfterHTML = '<form method="post" action="' + base + '/generate-after" style="display:inline;margin-left:0.5rem">' +
+              '<select name="after_feature_id" style="margin-right:0.25rem">' + opts + '</select>' +
+              '<button type="submit" class="btn">Set Dependency</button></form>';
+          }
           return '<div class="card"><h2>Actions</h2>' +
             '<details style="margin-bottom:1rem"><summary style="cursor:pointer;font-weight:600">Reopen Dialog</summary>' +
             '<form method="post" action="' + base + '/reopen" style="margin-top:0.75rem">' +
@@ -249,7 +267,7 @@
             '<div class="flex-row" style="margin-top:0.25rem;align-items:center;gap:0.5rem">' +
             '<form method="post" action="' + base + '/generate-now" style="display:inline">' +
             '<button type="submit" class="btn btn-primary">Generate Now</button>' +
-            '</form></div></div>';
+            '</form>' + genAfterHTML + '</div></div>';
         }
 
         if (s === 'waiting' || s === 'ready_to_generate' || s === 'generating') {
@@ -258,6 +276,7 @@
         }
 
         if (s === 'done') {
+          if (isViewer) return '';
           return '<div class="card"><div class="muted" style="margin-bottom:0.5rem">Status: <strong>' +
             statusLabel(s) + '</strong></div>' +
             '<form method="post" action="' + base + '/archive">' +
