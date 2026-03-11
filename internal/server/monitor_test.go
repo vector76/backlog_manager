@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -358,5 +359,91 @@ func TestBeadMonitor_setNotify_calledOnAutoComplete(t *testing.T) {
 	}
 	if f.Status != model.StatusDone {
 		t.Errorf("status: want done, got %s", f.Status)
+	}
+}
+
+// countingClient wraps a real beadsserver client for GetStatuses, counts each call,
+// and returns a closed SSE channel to force the monitor into Mode B immediately.
+type countingClient struct {
+	real  *beadsserver.Client
+	calls atomic.Int32
+}
+
+func (c *countingClient) GetStatuses(ids []string) (map[string]string, error) {
+	c.calls.Add(1)
+	return c.real.GetStatuses(ids)
+}
+
+func (c *countingClient) SubscribeSSE(_ context.Context) <-chan struct{} {
+	ch := make(chan struct{})
+	close(ch)
+	return ch
+}
+
+func TestBeadMonitor_TriggerPoll_causesPoll(t *testing.T) {
+	beadIDs := []string{"bd-tp1", "bd-tp2"}
+	st, _, featureID := newMonitorStore(t, beadIDs)
+
+	statuses := map[string]string{
+		"bd-tp1": "in_progress",
+		"bd-tp2": "open",
+	}
+	srv := mockBeadsServer(t, statuses)
+	defer srv.Close()
+
+	// SSE returns a closed channel so the monitor enters Mode B immediately.
+	client := &countingClient{real: beadsserver.New(srv.URL)}
+	mon := server.NewBeadMonitor(client, st, time.Hour)
+
+	mon.Start()
+	t.Cleanup(mon.Stop)
+
+	// Wait for the initial poll (run() calls Poll() before entering any select loop).
+	for i := 0; i < 20; i++ {
+		if client.calls.Load() >= 1 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	beforeCount := client.calls.Load()
+	if beforeCount == 0 {
+		t.Fatal("initial poll did not complete within timeout")
+	}
+
+	mon.TriggerPoll()
+
+	// Wait for TriggerPoll to cause an additional GetStatuses call.
+	for i := 0; i < 10; i++ {
+		if client.calls.Load() > beforeCount {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if client.calls.Load() <= beforeCount {
+		t.Fatal("TriggerPoll did not cause an additional poll")
+	}
+
+	progress, ok := mon.GetProgress(featureID)
+	if !ok {
+		t.Fatal("expected progress to be cached")
+	}
+	if progress.Total != 2 {
+		t.Errorf("total: want 2, got %d", progress.Total)
+	}
+	if progress.Closed != 0 {
+		t.Errorf("closed: want 0, got %d", progress.Closed)
+	}
+}
+
+func TestBeadMonitor_TriggerPoll_doesNotStack(t *testing.T) {
+	beadIDs := []string{"bd-ds1"}
+	st, _, _ := newMonitorStore(t, beadIDs)
+
+	client := &errClient{err: errors.New("unavailable")}
+	mon := server.NewBeadMonitor(client, st, time.Hour)
+
+	// Call TriggerPoll 100 times in a tight loop — must not panic or block.
+	for i := 0; i < 100; i++ {
+		mon.TriggerPoll()
 	}
 }

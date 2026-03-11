@@ -36,6 +36,7 @@ type BeadMonitor struct {
 	interval time.Duration
 	notify   func(projectName, featureID string)
 	stop     chan struct{}
+	pollNow  chan struct{}
 
 	mu    sync.RWMutex
 	cache map[string]BeadProgress // featureID -> progress
@@ -54,6 +55,16 @@ func NewBeadMonitor(client BeadsClient, st Store, interval time.Duration) *BeadM
 		interval: interval,
 		cache:    make(map[string]BeadProgress),
 		stop:     make(chan struct{}),
+		pollNow:  make(chan struct{}, 1),
+	}
+}
+
+// TriggerPoll schedules an immediate poll. It is non-blocking: if a poll is already
+// pending, the call is a no-op.
+func (m *BeadMonitor) TriggerPoll() {
+	select {
+	case m.pollNow <- struct{}{}:
+	default:
 	}
 }
 
@@ -84,6 +95,8 @@ func (m *BeadMonitor) run() {
 				} else {
 					m.Poll()
 				}
+			case <-m.pollNow:
+				m.Poll()
 			case <-m.stop:
 				cancel()
 				return
@@ -118,6 +131,8 @@ func (m *BeadMonitor) run() {
 					sseCh = ch
 					inModeB = false
 				}
+			case <-m.pollNow:
+				m.Poll()
 			case <-m.stop:
 				ticker.Stop()
 				cancel()

@@ -1755,6 +1755,19 @@ func TestHandleRegisterBead_WrongStatus(t *testing.T) {
 	}
 }
 
+func TestHandleRegisterBead_TriggerPoll_nilMonitor(t *testing.T) {
+	// newTestServer passes no monitor (nil), so the register-bead handler must not panic.
+	srv, st := newTestServer(t)
+	featureID := setupFeatureAtGenerating(t, srv, st, "regbead-nilmon")
+	token := tokenForProject(t, st, "regbead-nilmon")
+
+	w := doRequest(t, srv, "POST", "/api/v1/features/"+featureID+"/register-bead",
+		map[string]any{"bead_id": "bd-nilmon1"}, bearerAuth(token))
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
 func TestHandleBeadsDone_Success(t *testing.T) {
 	srv, st := newTestServer(t)
 	featureID := setupFeatureAtGenerating(t, srv, st, "beadsdone")

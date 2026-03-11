@@ -113,7 +113,7 @@ func New(cfg *config.Config, st Store, monitors ...*BeadMonitor) (*http.Server, 
 		r.Get("/api/v1/features/{id}/pending", handleGetPending(st))
 		r.Post("/api/v1/features/{id}/submit-dialog", handleSubmitDialog(st, hub))
 		r.Post("/api/v1/features/{id}/start-generate", handleStartGenerate(st, hub))
-		r.Post("/api/v1/features/{id}/register-bead", handleRegisterBead(st, hub))
+		r.Post("/api/v1/features/{id}/register-bead", handleRegisterBead(st, hub, monitor))
 		r.Post("/api/v1/features/{id}/beads-done", handleBeadsDone(st, hub))
 		r.Post("/api/v1/features/{id}/register-artifact", handleRegisterArtifact(st, hub))
 		r.Post("/api/v1/features/{id}/complete", handleCompleteFeature(st, hub))
@@ -1185,7 +1185,7 @@ type registerBeadRequest struct {
 
 // handleRegisterBead handles POST /api/v1/features/{id}/register-bead.
 // Appends a single bead ID to the feature; feature remains in generating status.
-func handleRegisterBead(st Store, hub *NotifyHub) http.HandlerFunc {
+func handleRegisterBead(st Store, hub *NotifyHub, monitor *BeadMonitor) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		project, ok := r.Context().Value(projectContextKey).(*model.Project)
 		if !ok || project == nil {
@@ -1219,6 +1219,9 @@ func handleRegisterBead(st Store, hub *NotifyHub) http.HandlerFunc {
 		}
 		hub.NotifyFeature(project.Name + ":" + featureID)
 		writeJSON(w, http.StatusOK, toFeatureResponse(*updated))
+		if monitor != nil {
+			monitor.TriggerPoll()
+		}
 	}
 }
 
