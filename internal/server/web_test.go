@@ -880,6 +880,15 @@ func TestWebStaticFiles(t *testing.T) {
 	}
 }
 
+func TestWebStyleCSSNoFeatureTableHoverRule(t *testing.T) {
+	srv, _ := newTestServer(t)
+	w := webRequest(t, srv, "GET", "/static/style.css", "", nil)
+	body := w.Body.String()
+	if strings.Contains(body, ".feature-table tr:hover td") {
+		t.Errorf("style.css must not contain .feature-table tr:hover td rule, but it does")
+	}
+}
+
 // TestWebStaticPathTraversal checks that path traversal cannot reach template files.
 func TestWebStaticPathTraversal(t *testing.T) {
 	srv, _ := newTestServer(t)

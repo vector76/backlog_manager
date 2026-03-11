@@ -297,8 +297,6 @@ input:focus, textarea:focus {
   vertical-align: top;
 }
 
-.feature-table tr:hover td { background: var(--border); }
-
 .status-group { margin-bottom: 1.5rem; }
 .status-group-title {
   font-size: 0.85rem;
