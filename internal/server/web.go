@@ -230,8 +230,8 @@ func buildDashboardData(st Store, monitor *BeadMonitor) []projectDashData {
 				UpdatedAt:    f.UpdatedAt.Format("2006-01-02 15:04 UTC"),
 				UpdatedAtISO: f.UpdatedAt.Format(time.RFC3339),
 			}
-			if f.Status == model.StatusBeadsCreated && monitor != nil {
-				row.BeadInfo = beadInfoString(f.ID, monitor)
+			if f.Status == model.StatusBeadsCreated {
+				row.BeadInfo = beadInfoString(f.ID, monitor, len(f.BeadIDs))
 			}
 			rows = append(rows, row)
 		}
@@ -314,16 +314,16 @@ type featureRowData struct {
 }
 
 // beadInfoString returns a human-readable progress string for a feature's beads.
-func beadInfoString(featureID string, monitor *BeadMonitor) string {
+func beadInfoString(featureID string, monitor *BeadMonitor, total int) string {
 	if monitor == nil {
-		return ""
+		return fmt.Sprintf("0/%d beads closed", total)
 	}
 	p, ok := monitor.GetProgress(featureID)
 	if !ok {
-		return ""
+		return fmt.Sprintf("0/%d beads closed", total)
 	}
 	if p.Unavailable {
-		return "Bead status unavailable"
+		return fmt.Sprintf("?/%d beads closed", total)
 	}
 	return fmt.Sprintf("%d/%d beads closed", p.Closed, p.Total)
 }
