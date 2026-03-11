@@ -405,18 +405,27 @@ func (s *Store) GetFeature(projectName, featureID string) (*model.Feature, error
 }
 
 // GetFeatureDetail returns a feature along with its full dialog history read from disk.
+// The store lock is released before any disk I/O to avoid blocking concurrent readers.
 func (s *Store) GetFeatureDetail(projectName, featureID string) (*model.FeatureDetail, error) {
 	s.mu.RLock()
-	defer s.mu.RUnlock()
-
 	f, err := s.getFeatureLocked(projectName, featureID)
 	if err != nil {
+		s.mu.RUnlock()
 		return nil, err
 	}
 	iterations := f.CurrentIteration
+	feat := *f
+	// Deep copy Iterations so the caller can safely read it after we release the lock.
+	// RespondToDialog mutates elements in-place (IsFinal), which would race with reads
+	// of the shared backing array if we only did a shallow copy.
+	if len(f.Iterations) > 0 {
+		feat.Iterations = make([]model.DialogIteration, len(f.Iterations))
+		copy(feat.Iterations, f.Iterations)
+	}
+	detail := &model.FeatureDetail{Feature: feat}
+	s.mu.RUnlock()
 
-	detail := &model.FeatureDetail{Feature: *f}
-
+	// Path helpers only use s.dataDir which is immutable, so no lock needed.
 	// Read initial description (v0)
 	v0, err := readFileOptional(s.descriptionPath(projectName, featureID, 0))
 	if err != nil {
@@ -446,6 +455,8 @@ func (s *Store) GetFeatureDetail(projectName, featureID string) (*model.FeatureD
 }
 
 // UpdateDescriptionV0 overwrites description_v0.md for a feature in draft status.
+// Uses a write lock so the status check and file write are atomic: a concurrent
+// StartDialog call cannot transition the feature out of draft between the two steps.
 func (s *Store) UpdateDescriptionV0(projectName, featureID, description string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -593,10 +604,10 @@ func (s *Store) WriteHumanResponse(projectName, featureID string, round int, res
 	if round < 1 {
 		return fmt.Errorf("round must be >= 1, got %d", round)
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if _, err := s.getFeatureLocked(projectName, featureID); err != nil {
+	s.mu.RLock()
+	_, err := s.getFeatureLocked(projectName, featureID)
+	s.mu.RUnlock()
+	if err != nil {
 		return err
 	}
 
@@ -606,8 +617,9 @@ func (s *Store) WriteHumanResponse(projectName, featureID string, round int, res
 // ReadDescriptionVersion reads description_vN.md (N=0 is the initial description).
 func (s *Store) ReadDescriptionVersion(projectName, featureID string, version int) (string, error) {
 	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if _, err := s.getFeatureLocked(projectName, featureID); err != nil {
+	_, err := s.getFeatureLocked(projectName, featureID)
+	s.mu.RUnlock()
+	if err != nil {
 		return "", err
 	}
 	return readFileOptional(s.descriptionPath(projectName, featureID, version))
@@ -616,8 +628,9 @@ func (s *Store) ReadDescriptionVersion(projectName, featureID string, version in
 // ReadQuestions reads questions_vN.md for a dialog round.
 func (s *Store) ReadQuestions(projectName, featureID string, round int) (string, error) {
 	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if _, err := s.getFeatureLocked(projectName, featureID); err != nil {
+	_, err := s.getFeatureLocked(projectName, featureID)
+	s.mu.RUnlock()
+	if err != nil {
 		return "", err
 	}
 	return readFileOptional(s.questionsPath(projectName, featureID, round))
@@ -626,8 +639,9 @@ func (s *Store) ReadQuestions(projectName, featureID string, round int) (string,
 // ReadResponse reads response_vN.md for a dialog round.
 func (s *Store) ReadResponse(projectName, featureID string, round int) (string, error) {
 	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if _, err := s.getFeatureLocked(projectName, featureID); err != nil {
+	_, err := s.getFeatureLocked(projectName, featureID)
+	s.mu.RUnlock()
+	if err != nil {
 		return "", err
 	}
 	return readFileOptional(s.responsePath(projectName, featureID, round))
@@ -635,9 +649,10 @@ func (s *Store) ReadResponse(projectName, featureID string, round int) (string, 
 
 // WriteArtifact writes a named artifact file (e.g., "plan.md", "beads.md") for a feature.
 func (s *Store) WriteArtifact(projectName, featureID, name, content string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if _, err := s.getFeatureLocked(projectName, featureID); err != nil {
+	s.mu.RLock()
+	_, err := s.getFeatureLocked(projectName, featureID)
+	s.mu.RUnlock()
+	if err != nil {
 		return err
 	}
 	return os.WriteFile(s.artifactPath(projectName, featureID, name), []byte(content), 0644)
@@ -646,8 +661,9 @@ func (s *Store) WriteArtifact(projectName, featureID, name, content string) erro
 // ReadArtifact reads a named artifact file for a feature.
 func (s *Store) ReadArtifact(projectName, featureID, name string) (string, error) {
 	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if _, err := s.getFeatureLocked(projectName, featureID); err != nil {
+	_, err := s.getFeatureLocked(projectName, featureID)
+	s.mu.RUnlock()
+	if err != nil {
 		return "", err
 	}
 	return readFileOptional(s.artifactPath(projectName, featureID, name))
@@ -894,15 +910,41 @@ func (s *Store) RecordPoll(projectName string) {
 // ready_to_generate) that is unclaimed or whose claim has expired, claims it by
 // setting ClaimedAt, and returns it along with the action type.
 // Returns nil if no actionable, unclaimed feature is available.
+//
+// Uses a two-phase approach: first scan under RLock (cheap, non-blocking), then
+// acquire the write lock only if a candidate was found. This avoids taking a write
+// lock on every 500ms poll when there is nothing to claim.
 func (s *Store) ClaimFeature(projectName string) (*model.Feature, model.FeatureAction, error) {
+	// Phase 1: fast scan under RLock to avoid write-lock churn when idle.
+	s.mu.RLock()
+	if _, err := s.getProjectLocked(projectName); err != nil {
+		s.mu.RUnlock()
+		return nil, 0, err
+	}
+	now := time.Now().UTC()
+	candidateFound := false
+	for _, f := range s.features[projectName] {
+		switch f.Status {
+		case model.StatusAwaitingClient, model.StatusReadyToGenerate:
+		default:
+			continue
+		}
+		if f.ClaimedAt == nil || now.Sub(*f.ClaimedAt) >= ClaimTTL {
+			candidateFound = true
+			break
+		}
+	}
+	s.mu.RUnlock()
+
+	if !candidateFound {
+		return nil, 0, nil
+	}
+
+	// Phase 2: re-scan and claim under write lock (state may have changed).
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if _, err := s.getProjectLocked(projectName); err != nil {
-		return nil, 0, err
-	}
-
-	now := time.Now().UTC()
+	now = time.Now().UTC()
 	for i, f := range s.features[projectName] {
 		var action model.FeatureAction
 		switch f.Status {
