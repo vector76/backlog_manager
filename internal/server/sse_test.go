@@ -394,6 +394,61 @@ func TestPollNotifiesDashboard(t *testing.T) {
 	}
 }
 
+// TestHandleFeatureData_beadsCreated_cacheMiss verifies that the /data endpoint
+// returns bead_progress with correct counts for a beads_created feature when no
+// BeadMonitor is present (cache miss / unavailable=false, counts from store).
+func TestHandleFeatureData_beadsCreated_cacheMiss(t *testing.T) {
+	srv, st := newTestServer(t)
+	featureID := setupFeatureAtGenerating(t, srv, st, "bddata")
+	token := tokenForProject(t, st, "bddata")
+	cookie := loginWeb(t, srv)
+
+	// Register two beads.
+	for _, beadID := range []string{"bd-aaa1", "bd-bbb2"} {
+		w := doRequest(t, srv, "POST", "/api/v1/features/"+featureID+"/register-bead",
+			map[string]any{"bead_id": beadID}, bearerAuth(token))
+		if w.Code != http.StatusOK {
+			t.Fatalf("register-bead %s: expected 200, got %d: %s", beadID, w.Code, w.Body.String())
+		}
+	}
+
+	// Transition to beads_created.
+	w := doRequest(t, srv, "POST", "/api/v1/features/"+featureID+"/beads-done", nil, bearerAuth(token))
+	if w.Code != http.StatusOK {
+		t.Fatalf("beads-done: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// GET the feature data endpoint via web session.
+	path := "/project/bddata/feature/" + featureID + "/data"
+	w2 := webRequest(t, srv, "GET", path, "", cookie)
+	if w2.Code != http.StatusOK {
+		t.Fatalf("feature data: expected 200, got %d: %s", w2.Code, w2.Body.String())
+	}
+
+	var resp struct {
+		BeadProgress *struct {
+			Total       int  `json:"total"`
+			Closed      int  `json:"closed"`
+			Unavailable bool `json:"unavailable"`
+		} `json:"bead_progress"`
+	}
+	if err := json.NewDecoder(w2.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.BeadProgress == nil {
+		t.Fatal("expected bead_progress to be present, got nil (omitted)")
+	}
+	if resp.BeadProgress.Total != 2 {
+		t.Errorf("expected total=2, got %d", resp.BeadProgress.Total)
+	}
+	if resp.BeadProgress.Closed != 0 {
+		t.Errorf("expected closed=0, got %d", resp.BeadProgress.Closed)
+	}
+	if resp.BeadProgress.Unavailable {
+		t.Error("expected unavailable=false, got true")
+	}
+}
+
 // TestHandleDashboardDataUpdatedAtISO checks that the /data endpoint includes
 // updated_at_iso (ISO 8601) alongside updated_at for each feature row.
 func TestHandleDashboardDataUpdatedAtISO(t *testing.T) {
