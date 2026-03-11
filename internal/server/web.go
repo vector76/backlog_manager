@@ -404,7 +404,7 @@ type featureDetailPageData struct {
 	LatestQuestions    string
 	Iterations         []featureIterationPageData
 	OtherFeatures      []featureRowData
-	BeadProgress       *BeadProgress // non-nil for beads_created features when monitor is available
+	BeadProgress       *BeadProgress // non-nil for all beads_created features
 }
 
 // buildFeatureDetailData assembles featureDetailPageData for a single feature.
@@ -473,8 +473,15 @@ func buildFeatureDetailData(st Store, monitor *BeadMonitor, projectName, feature
 
 	// Bead progress for features in beads_created status.
 	var beadProgress *BeadProgress
-	if detail.Status == model.StatusBeadsCreated && monitor != nil {
-		if p, ok := monitor.GetProgress(detail.ID); ok {
+	if detail.Status == model.StatusBeadsCreated {
+		if monitor != nil {
+			if p, ok := monitor.GetProgress(detail.ID); ok {
+				beadProgress = &p
+			}
+		}
+		if beadProgress == nil {
+			// Fallback: monitor absent or cache not yet populated.
+			p := BeadProgress{Total: len(detail.BeadIDs)}
 			beadProgress = &p
 		}
 	}

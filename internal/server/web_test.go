@@ -2284,6 +2284,60 @@ func TestDashboardBeadInfoFallback(t *testing.T) {
 	}
 }
 
+// TestFeatureDetailBeadProgressFallback verifies that the feature detail page renders the
+// fallback bead count string when the server has no bead monitor (nil monitor).
+func TestFeatureDetailBeadProgressFallback(t *testing.T) {
+	srv, st := newTestServer(t)
+	cookie := loginWeb(t, srv)
+
+	token := createProjectAndToken(t, srv, "detail-fallback")
+	auth := basicAuth("admin", "secret")
+
+	// Create feature.
+	w := doRequest(t, srv, "POST", "/api/v1/projects/detail-fallback/features",
+		map[string]any{"name": "my-feat", "description": "desc"}, auth)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create feature: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var feat map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&feat); err != nil {
+		t.Fatal(err)
+	}
+	featureID := feat["id"].(string)
+
+	// Advance to generating.
+	for _, s := range []model.FeatureStatus{
+		model.StatusAwaitingClient, model.StatusFullySpecified,
+		model.StatusReadyToGenerate, model.StatusGenerating,
+	} {
+		if err := st.TransitionStatus("detail-fallback", featureID, s); err != nil {
+			t.Fatalf("transition to %v: %v", s, err)
+		}
+	}
+
+	// Register one bead.
+	w = doRequest(t, srv, "POST", "/api/v1/features/"+featureID+"/register-bead",
+		map[string]any{"bead_id": "bd-test1"}, bearerAuth(token))
+	if w.Code != http.StatusOK {
+		t.Fatalf("register-bead: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Transition to beads_created.
+	w = doRequest(t, srv, "POST", "/api/v1/features/"+featureID+"/beads-done", nil, bearerAuth(token))
+	if w.Code != http.StatusOK {
+		t.Fatalf("beads-done: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// GET feature detail page — nil monitor server should render fallback count.
+	w2 := webRequest(t, srv, "GET", "/project/detail-fallback/feature/"+featureID, "", cookie)
+	if w2.Code != http.StatusOK {
+		t.Fatalf("feature detail: expected 200, got %d", w2.Code)
+	}
+	if !strings.Contains(w2.Body.String(), "0/1 beads closed") {
+		t.Errorf("expected '0/1 beads closed' in feature detail body, got: %s", w2.Body.String())
+	}
+}
+
 // TestTimestampFormatZeroTime confirms the format strings used in web.go do not panic and
 // produce well-defined output for a feature whose UpdatedAt is Go's zero time.
 func TestTimestampFormatZeroTime(t *testing.T) {

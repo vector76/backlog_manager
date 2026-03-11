@@ -140,7 +140,7 @@
   <div class="muted" style="margin-bottom:0.5rem">Status: <strong>{{statusLabel .Feature.Status}}</strong></div>
   {{if .BeadProgress}}
     {{if .BeadProgress.Unavailable}}
-    <div class="muted" style="margin-bottom:0.75rem">Bead status unavailable</div>
+    <div class="muted" style="margin-bottom:0.75rem">?/{{.BeadProgress.Total}} beads closed</div>
     {{else}}
     <div style="margin-bottom:0.75rem">
       <strong id="bead-progress-label">{{.BeadProgress.Closed}}/{{.BeadProgress.Total}} beads closed</strong>
