@@ -416,6 +416,8 @@
           });
       }
 
+      var isViewer = !!document.querySelector('.viewer-badge');
+
       function buildProjectBodyHTML(p) {
         var proj = escHTML(p.name);
         if (!p.features || p.features.length === 0) {
@@ -427,9 +429,12 @@
           var beadHTML = f.bead_info
             ? '<span class="muted" style="font-size:0.8rem;margin-left:0.4rem">' + escHTML(f.bead_info) + '</span>'
             : '';
+          var archiveHTML = (f.status === 'done' && !isViewer)
+            ? '<form method="post" action="/project/' + proj + '/feature/' + escHTML(f.id) + '/archive" style="display:inline;margin-left:0.4rem"><button type="submit" class="btn" style="padding:0.1rem 0.4rem;font-size:0.75rem">Archive</button></form>'
+            : '';
           rows += '<tr>' +
             '<td><a href="/project/' + proj + '/feature/' + escHTML(f.id) + '">' + escHTML(f.name) + '</a></td>' +
-            '<td><span class="badge ' + escHTML(statusBadgeClass(f.status)) + '">' + escHTML(statusLabel(f.status)) + '</span>' + beadHTML + '</td>' +
+            '<td><span class="badge ' + escHTML(statusBadgeClass(f.status)) + '">' + escHTML(statusLabel(f.status)) + '</span>' + beadHTML + archiveHTML + '</td>' +
             '<td class="muted" style="font-size:0.85rem;white-space:nowrap"><time class="local-time" datetime="' + escHTML(f.updated_at_iso) + '">' + escHTML(f.updated_at) + '</time></td>' +
             '</tr>';
         }

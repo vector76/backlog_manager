@@ -67,6 +67,7 @@
             <td>
               <span class="badge {{statusBadgeClass .Status}}">{{statusLabel .Status}}</span>
               {{if .BeadInfo}}<span class="muted" style="font-size:0.8rem;margin-left:0.4rem">{{.BeadInfo}}</span>{{end}}
+              {{if and (eq .Status "done") (not $.IsViewer)}}<form method="post" action="/project/{{$proj}}/feature/{{.ID}}/archive" style="display:inline;margin-left:0.4rem"><button type="submit" class="btn" style="padding:0.1rem 0.4rem;font-size:0.75rem">Archive</button></form>{{end}}
             </td>
             <td class="muted" style="font-size:0.85rem;white-space:nowrap"><time class="local-time" datetime="{{.UpdatedAtISO}}">{{.UpdatedAt}}</time></td>
           </tr>

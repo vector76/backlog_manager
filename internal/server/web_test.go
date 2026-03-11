@@ -2140,6 +2140,94 @@ func TestWebDashboardHidesArchivedFeatures(t *testing.T) {
 	}
 }
 
+// TestWebDashboardArchiveButtonForDoneFeature checks that a done feature row in the dashboard
+// shows an Archive button, and that non-done features do not show one.
+func TestWebDashboardArchiveButtonForDoneFeature(t *testing.T) {
+	srv, st := newTestServer(t)
+	cookie := loginWeb(t, srv)
+
+	if _, err := st.CreateProject("dash-archive-project", "tok-dash-archive"); err != nil {
+		t.Fatal(err)
+	}
+	f, err := st.CreateFeature("dash-archive-project", "Done Feature For Dashboard", "desc", false, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range []model.FeatureStatus{
+		model.StatusAwaitingClient,
+		model.StatusFullySpecified,
+		model.StatusReadyToGenerate,
+		model.StatusGenerating,
+		model.StatusBeadsCreated,
+		model.StatusDone,
+	} {
+		if err := st.TransitionStatus("dash-archive-project", f.ID, s); err != nil {
+			t.Fatalf("transition to %v: %v", s, err)
+		}
+	}
+
+	w := webRequest(t, srv, "GET", "/", "", cookie)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	body := w.Body.String()
+	archiveAction := "/project/dash-archive-project/feature/" + f.ID + "/archive"
+	if !strings.Contains(body, archiveAction) {
+		t.Errorf("expected archive button for done feature in dashboard, but not found")
+	}
+
+	// Also verify a draft feature does NOT have an archive button.
+	f2, err := st.CreateFeature("dash-archive-project", "Draft Feature For Dashboard", "desc", false, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	w2 := webRequest(t, srv, "GET", "/", "", cookie)
+	if w2.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w2.Code)
+	}
+	body2 := w2.Body.String()
+	archiveActionDraft := "/project/dash-archive-project/feature/" + f2.ID + "/archive"
+	if strings.Contains(body2, archiveActionDraft) {
+		t.Errorf("draft feature should not have archive button in dashboard")
+	}
+}
+
+// TestWebDashboardArchiveButtonHiddenForViewer checks that the Archive button is not shown
+// in the dashboard for viewer sessions, even on done features.
+func TestWebDashboardArchiveButtonHiddenForViewer(t *testing.T) {
+	srv, st := newTestServerWithViewer(t)
+	viewerCookie := loginWebAsViewer(t, srv)
+
+	if _, err := st.CreateProject("viewer-arch-project", "tok-viewer-arch"); err != nil {
+		t.Fatal(err)
+	}
+	f, err := st.CreateFeature("viewer-arch-project", "Done Feature Viewer", "desc", false, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range []model.FeatureStatus{
+		model.StatusAwaitingClient,
+		model.StatusFullySpecified,
+		model.StatusReadyToGenerate,
+		model.StatusGenerating,
+		model.StatusBeadsCreated,
+		model.StatusDone,
+	} {
+		if err := st.TransitionStatus("viewer-arch-project", f.ID, s); err != nil {
+			t.Fatalf("transition to %v: %v", s, err)
+		}
+	}
+
+	w := webRequest(t, srv, "GET", "/", "", viewerCookie)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	archiveAction := "/project/viewer-arch-project/feature/" + f.ID + "/archive"
+	if strings.Contains(w.Body.String(), archiveAction) {
+		t.Errorf("viewer dashboard should not show archive button for done feature")
+	}
+}
+
 // TestTimestampFormatZeroTime confirms the format strings used in web.go do not panic and
 // produce well-defined output for a feature whose UpdatedAt is Go's zero time.
 func TestTimestampFormatZeroTime(t *testing.T) {
