@@ -696,6 +696,7 @@ func TestValidTransitions(t *testing.T) {
 		{model.StatusReadyToGenerate, model.StatusGenerating},
 		{model.StatusGenerating, model.StatusBeadsCreated},
 		{model.StatusBeadsCreated, model.StatusDone},
+		{model.StatusDone, model.StatusArchived},
 		// Any -> abandoned/halted
 		{model.StatusDraft, model.StatusAbandoned},
 		{model.StatusDraft, model.StatusHalted},
@@ -719,6 +720,10 @@ func TestInvalidTransitions(t *testing.T) {
 		{model.StatusAwaitingClient, model.StatusDraft},
 		{model.StatusDone, model.StatusDraft},
 		{model.StatusDone, model.StatusGenerating},
+		{model.StatusArchived, model.StatusDraft},
+		{model.StatusArchived, model.StatusDone},
+		{model.StatusArchived, model.StatusAbandoned},
+		{model.StatusArchived, model.StatusHalted},
 		{model.StatusAbandoned, model.StatusDraft},
 		{model.StatusBeadsCreated, model.StatusAwaitingClient},
 	}
@@ -821,6 +826,38 @@ func TestTransitionStatus_GenerationPipeline(t *testing.T) {
 	}
 	if got.Status != model.StatusDone {
 		t.Errorf("expected done, got %v", got.Status)
+	}
+}
+
+func TestTransitionStatus_ArchiveDoneFeature(t *testing.T) {
+	s := newTestStore(t)
+	if _, err := s.CreateProject("p", "tok"); err != nil {
+		t.Fatal(err)
+	}
+	f, err := s.CreateFeature("p", "feat", "desc", false, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pipeline := []model.FeatureStatus{
+		model.StatusAwaitingClient,
+		model.StatusFullySpecified,
+		model.StatusReadyToGenerate,
+		model.StatusGenerating,
+		model.StatusBeadsCreated,
+		model.StatusDone,
+		model.StatusArchived,
+	}
+	for _, s2 := range pipeline {
+		if err := s.TransitionStatus("p", f.ID, s2); err != nil {
+			t.Fatalf("transition to %v: %v", s2, err)
+		}
+	}
+	got, err := s.GetFeature("p", f.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != model.StatusArchived {
+		t.Errorf("expected archived, got %v", got.Status)
 	}
 }
 

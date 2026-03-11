@@ -150,6 +150,7 @@ func New(cfg *config.Config, st Store, monitors ...*BeadMonitor) (*http.Server, 
 			r.Post("/project/{name}/feature/{id}/generate-after", handleWebGenerateAfter(st, hub))
 			r.Post("/project/{name}/feature/{id}/rename", handleWebRenameFeature(st, hub))
 			r.Post("/project/{name}/feature/{id}/delete", handleWebDeleteDraftFeature(st))
+			r.Post("/project/{name}/feature/{id}/archive", handleWebArchiveFeature(st, hub))
 		})
 	})
 

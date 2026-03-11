@@ -91,7 +91,8 @@
         beads_created: 'Beads Created',
         done: 'Done',
         halted: 'Halted',
-        abandoned: 'Abandoned'
+        abandoned: 'Abandoned',
+        archived: 'Archived'
       };
       return m[s] || s;
     }
@@ -254,6 +255,13 @@
         if (s === 'waiting' || s === 'ready_to_generate' || s === 'generating') {
           return '<div class="card"><div class="muted" style="margin-bottom:0.5rem">Status: <strong>' +
             statusLabel(s) + '</strong></div><button type="button" class="btn" disabled>Halt</button></div>';
+        }
+
+        if (s === 'done') {
+          return '<div class="card"><div class="muted" style="margin-bottom:0.5rem">Status: <strong>' +
+            statusLabel(s) + '</strong></div>' +
+            '<form method="post" action="' + base + '/archive">' +
+            '<button type="submit" class="btn">Archive</button></form></div>';
         }
 
         if (s === 'beads_created') {

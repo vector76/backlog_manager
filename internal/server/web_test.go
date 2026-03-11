@@ -1677,6 +1677,7 @@ func TestViewerBlockedFromMutatingRoutes(t *testing.T) {
 		{"POST", "/project/" + pname + "/feature/" + fid + "/generate-after", ""},
 		{"POST", "/project/" + pname + "/feature/" + fid + "/rename", "name=newname"},
 		{"POST", "/project/" + pname + "/feature/" + fid + "/delete", ""},
+		{"POST", "/project/" + pname + "/feature/" + fid + "/archive", ""},
 	}
 
 	for _, route := range mutatingRoutes {
@@ -1738,6 +1739,7 @@ func TestNoSessionBlockedFromMutatingRoutes(t *testing.T) {
 		{"/project/" + pname + "/feature/" + fid + "/generate-after", ""},
 		{"/project/" + pname + "/feature/" + fid + "/rename", "name=newname"},
 		{"/project/" + pname + "/feature/" + fid + "/delete", ""},
+		{"/project/" + pname + "/feature/" + fid + "/archive", ""},
 	}
 
 	for _, route := range mutatingRoutes {
@@ -2014,6 +2016,118 @@ func TestTimestampFormatMidnightUTC(t *testing.T) {
 	displayStr := midnight.Format("2006-01-02 15:04 UTC")
 	if !strings.HasSuffix(displayStr, " UTC") {
 		t.Errorf("expected display string to end with ' UTC', got %q", displayStr)
+	}
+}
+
+// TestWebArchiveFeature checks that a done feature can be archived via the web route.
+func TestWebArchiveFeature(t *testing.T) {
+	srv, st := newTestServer(t)
+	cookie := loginWeb(t, srv)
+
+	if _, err := st.CreateProject("archive-project", "tok-archive"); err != nil {
+		t.Fatal(err)
+	}
+	f, err := st.CreateFeature("archive-project", "Done Feature", "desc", false, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Transition to done via pipeline.
+	for _, s := range []model.FeatureStatus{
+		model.StatusAwaitingClient,
+		model.StatusFullySpecified,
+		model.StatusReadyToGenerate,
+		model.StatusGenerating,
+		model.StatusBeadsCreated,
+		model.StatusDone,
+	} {
+		if err := st.TransitionStatus("archive-project", f.ID, s); err != nil {
+			t.Fatalf("transition to %v: %v", s, err)
+		}
+	}
+
+	w := webRequest(t, srv, "POST", "/project/archive-project/feature/"+f.ID+"/archive", "", cookie)
+	if w.Code != http.StatusFound {
+		t.Fatalf("expected 302 redirect, got %d", w.Code)
+	}
+	if loc := w.Header().Get("Location"); loc != "/" {
+		t.Errorf("expected redirect to /, got %s", loc)
+	}
+
+	// Feature should now be archived.
+	got, err := st.GetFeature("archive-project", f.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != model.StatusArchived {
+		t.Errorf("expected archived status, got %v", got.Status)
+	}
+}
+
+// TestWebArchiveNonDoneFeature_Rejected checks that archiving a non-done feature is rejected.
+func TestWebArchiveNonDoneFeature_Rejected(t *testing.T) {
+	srv, st := newTestServer(t)
+	cookie := loginWeb(t, srv)
+
+	if _, err := st.CreateProject("archive-reject-project", "tok-archive-reject"); err != nil {
+		t.Fatal(err)
+	}
+	f, err := st.CreateFeature("archive-reject-project", "Draft Feature", "desc", false, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	featurePage := "/project/archive-reject-project/feature/" + f.ID
+	w := webRequest(t, srv, "POST", featurePage+"/archive", "", cookie)
+	if w.Code != http.StatusFound {
+		t.Fatalf("expected 302 redirect, got %d", w.Code)
+	}
+	if loc := w.Header().Get("Location"); loc != featurePage {
+		t.Errorf("expected redirect back to feature page %s, got %s", featurePage, loc)
+	}
+
+	// Feature should still be draft.
+	got, err := st.GetFeature("archive-reject-project", f.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != model.StatusDraft {
+		t.Errorf("expected draft status unchanged, got %v", got.Status)
+	}
+}
+
+// TestWebDashboardHidesArchivedFeatures checks that archived features don't appear in dashboard.
+func TestWebDashboardHidesArchivedFeatures(t *testing.T) {
+	srv, st := newTestServer(t)
+	cookie := loginWeb(t, srv)
+
+	if _, err := st.CreateProject("hide-archive-project", "tok-hide"); err != nil {
+		t.Fatal(err)
+	}
+	f, err := st.CreateFeature("hide-archive-project", "To Archive", "desc", false, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range []model.FeatureStatus{
+		model.StatusAwaitingClient,
+		model.StatusFullySpecified,
+		model.StatusReadyToGenerate,
+		model.StatusGenerating,
+		model.StatusBeadsCreated,
+		model.StatusDone,
+		model.StatusArchived,
+	} {
+		if err := st.TransitionStatus("hide-archive-project", f.ID, s); err != nil {
+			t.Fatalf("transition to %v: %v", s, err)
+		}
+	}
+
+	w := webRequest(t, srv, "GET", "/", "", cookie)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	if strings.Contains(w.Body.String(), "To Archive") {
+		t.Errorf("archived feature should not appear in dashboard")
 	}
 }
 

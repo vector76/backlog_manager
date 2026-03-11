@@ -20,6 +20,7 @@ const (
 	StatusDone
 	StatusHalted
 	StatusAbandoned
+	StatusArchived
 )
 
 var featureStatusNames = map[FeatureStatus]string{
@@ -34,6 +35,7 @@ var featureStatusNames = map[FeatureStatus]string{
 	StatusDone:            "done",
 	StatusHalted:          "halted",
 	StatusAbandoned:       "abandoned",
+	StatusArchived:        "archived",
 }
 
 var featureStatusValues = map[string]FeatureStatus{}

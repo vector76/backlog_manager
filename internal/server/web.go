@@ -64,6 +64,7 @@ var templateFuncs = template.FuncMap{
 			"done":             "Done",
 			"halted":           "Halted",
 			"abandoned":        "Abandoned",
+			"archived":         "Archived",
 		}
 		if l, ok := labels[status]; ok {
 			return l
@@ -189,6 +190,7 @@ var terminalStatuses = map[model.FeatureStatus]bool{
 	model.StatusDone:      true,
 	model.StatusHalted:    true,
 	model.StatusAbandoned: true,
+	model.StatusArchived:  true,
 }
 
 // buildDashboardData assembles projectDashData for all projects.
@@ -201,6 +203,9 @@ func buildDashboardData(st Store, monitor *BeadMonitor) []projectDashData {
 
 		var active, terminal []model.Feature
 		for _, f := range features {
+			if f.Status == model.StatusArchived {
+				continue
+			}
 			if terminalStatuses[f.Status] {
 				terminal = append(terminal, f)
 			} else {
@@ -233,7 +238,7 @@ func buildDashboardData(st Store, monitor *BeadMonitor) []projectDashData {
 
 		dashProjects = append(dashProjects, projectDashData{
 			Name:         p.Name,
-			FeatureCount: len(features),
+			FeatureCount: len(active) + len(terminal),
 			Connectivity: connectivityStatus(lastPoll),
 			Features:     rows,
 		})
@@ -629,6 +634,28 @@ func handleWebDeleteDraftFeature(st Store) http.HandlerFunc {
 			http.Redirect(w, r, featurePage, http.StatusFound)
 			return
 		}
+		http.Redirect(w, r, "/", http.StatusFound)
+	}
+}
+
+// handleWebArchiveFeature handles POST /project/{name}/feature/{id}/archive.
+// Transitions a done feature to archived and redirects to the dashboard.
+func handleWebArchiveFeature(st Store, hub *NotifyHub) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		projectName := chi.URLParam(r, "name")
+		featureID := chi.URLParam(r, "id")
+		featurePage := "/project/" + projectName + "/feature/" + featureID
+		f, err := st.GetFeature(projectName, featureID)
+		if err != nil || f.Status != model.StatusDone {
+			http.Redirect(w, r, featurePage, http.StatusFound)
+			return
+		}
+		if err := st.TransitionStatus(projectName, featureID, model.StatusArchived); err != nil {
+			http.Redirect(w, r, featurePage, http.StatusFound)
+			return
+		}
+		hub.NotifyFeature(projectName + ":" + featureID)
+		hub.NotifyDashboard()
 		http.Redirect(w, r, "/", http.StatusFound)
 	}
 }

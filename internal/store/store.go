@@ -18,7 +18,7 @@ import (
 const ClaimTTL = 60 * time.Minute
 
 // validTransitions maps each source status to the set of valid target statuses.
-// All statuses may transition to Abandoned or Halted (handled separately).
+// Most statuses may also transition to Abandoned or Halted (handled separately in validateTransition).
 var validTransitions = map[model.FeatureStatus]map[model.FeatureStatus]bool{
 	model.StatusDraft: {
 		model.StatusAwaitingClient: true,
@@ -47,9 +47,12 @@ var validTransitions = map[model.FeatureStatus]map[model.FeatureStatus]bool{
 	model.StatusBeadsCreated: {
 		model.StatusDone: true,
 	},
-	model.StatusDone:      {},
+	model.StatusDone: {
+		model.StatusArchived: true,
+	},
 	model.StatusAbandoned: {},
 	model.StatusHalted:    {},
+	model.StatusArchived:  {},
 }
 
 // projectsRegistry is the JSON structure for projects.json.
@@ -843,8 +846,11 @@ func ValidateTransition(from, to model.FeatureStatus) error {
 }
 
 func validateTransition(from, to model.FeatureStatus) error {
-	// Any status can transition to abandoned or halted
+	// Any status except archived can transition to abandoned or halted
 	if to == model.StatusAbandoned || to == model.StatusHalted {
+		if from == model.StatusArchived {
+			return fmt.Errorf("invalid status transition from %v to %v", from, to)
+		}
 		return nil
 	}
 	targets, ok := validTransitions[from]

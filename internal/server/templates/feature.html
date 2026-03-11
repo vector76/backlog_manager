@@ -124,6 +124,17 @@
 </div>
 {{end}}
 
+{{if eq .Feature.Status "done"}}
+{{if not .IsViewer}}
+<div class="card">
+  <div class="muted" style="margin-bottom:0.5rem">Status: <strong>{{statusLabel .Feature.Status}}</strong></div>
+  <form method="post" action="/project/{{.ProjectName}}/feature/{{.Feature.ID}}/archive">
+    <button type="submit" class="btn">Archive</button>
+  </form>
+</div>
+{{end}}
+{{end}}
+
 {{if eq .Feature.Status "beads_created"}}
 <div class="card">
   <div class="muted" style="margin-bottom:0.5rem">Status: <strong>{{statusLabel .Feature.Status}}</strong></div>
