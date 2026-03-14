@@ -818,6 +818,33 @@ func TestWebFeatureDetailLivePageAttributes(t *testing.T) {
 	if !strings.Contains(body, `data-feature-id="`+f.ID+`"`) {
 		t.Errorf("expected data-feature-id attribute in feature page")
 	}
+	if !strings.Contains(body, `data-is-viewer="false"`) {
+		t.Errorf("expected data-is-viewer=\"false\" for admin session")
+	}
+}
+
+// TestWebFeatureDetailLivePageAttributes_Viewer checks that the feature page sets
+// data-is-viewer="true" for viewer sessions.
+func TestWebFeatureDetailLivePageAttributes_Viewer(t *testing.T) {
+	srv, st := newTestServerWithViewer(t)
+	cookie := loginWebAsViewer(t, srv)
+
+	_, err := st.CreateProject("viewer-attr-project", "tok-viewer-attr")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := st.CreateFeature("viewer-attr-project", "Viewer Feature", "Description.", false, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	w := webRequest(t, srv, "GET", "/project/viewer-attr-project/feature/"+f.ID, "", cookie)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), `data-is-viewer="true"`) {
+		t.Errorf("expected data-is-viewer=\"true\" for viewer session")
+	}
 }
 
 // TestWebFeatureDetailActionSectionContainer checks that the action-section div is present.

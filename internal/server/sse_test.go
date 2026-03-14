@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/vector76/backlog_manager/internal/config"
+	"github.com/vector76/backlog_manager/internal/model"
 	"github.com/vector76/backlog_manager/internal/server"
 	"github.com/vector76/backlog_manager/internal/store"
 )
@@ -95,6 +96,87 @@ func TestHandleFeatureData(t *testing.T) {
 	}
 	if resp.Name != "feat1" {
 		t.Errorf("expected name 'feat1', got %q", resp.Name)
+	}
+}
+
+// TestHandleFeatureData_OtherFeatures verifies that the /data endpoint includes
+// other_features for a fully_specified feature and omits it for other statuses.
+func TestHandleFeatureData_OtherFeatures(t *testing.T) {
+	srv, st := newTestServer(t)
+	cookie := loginWeb(t, srv)
+
+	const proj = "of-project"
+	if _, err := st.CreateProject(proj, "tok-of"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create subject feature and advance to fully_specified.
+	subject, err := st.CreateFeature(proj, "Subject", "desc", false, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.TransitionStatus(proj, subject.ID, model.StatusAwaitingClient); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.TransitionStatus(proj, subject.ID, model.StatusFullySpecified); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a sibling that should appear in other_features.
+	sibling, err := st.CreateFeature(proj, "Sibling", "desc", false, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.TransitionStatus(proj, sibling.ID, model.StatusAwaitingClient); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.TransitionStatus(proj, sibling.ID, model.StatusFullySpecified); err != nil {
+		t.Fatal(err)
+	}
+
+	path := "/project/" + proj + "/feature/" + subject.ID + "/data"
+	w := webRequest(t, srv, "GET", path, "", cookie)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	var resp struct {
+		Status        string `json:"status"`
+		OtherFeatures []struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		} `json:"other_features"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Status != "fully_specified" {
+		t.Fatalf("expected status fully_specified, got %q", resp.Status)
+	}
+	if len(resp.OtherFeatures) != 1 {
+		t.Fatalf("expected 1 other feature, got %d", len(resp.OtherFeatures))
+	}
+	if resp.OtherFeatures[0].ID != sibling.ID {
+		t.Errorf("expected sibling ID %q, got %q", sibling.ID, resp.OtherFeatures[0].ID)
+	}
+
+	// A draft feature should have no other_features in the JSON.
+	draft, err := st.CreateFeature(proj, "Draft", "desc", false, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	w2 := webRequest(t, srv, "GET", "/project/"+proj+"/feature/"+draft.ID+"/data", "", cookie)
+	if w2.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w2.Code)
+	}
+	var resp2 struct {
+		OtherFeatures []any `json:"other_features"`
+	}
+	if err := json.NewDecoder(w2.Body).Decode(&resp2); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(resp2.OtherFeatures) != 0 {
+		t.Errorf("expected no other_features for draft feature, got %d", len(resp2.OtherFeatures))
 	}
 }
 
